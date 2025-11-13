@@ -8,6 +8,16 @@ st.title("📌 Clean GPKG Attribute Filler – No Duplicate Columns")
 
 gpkg_file = st.file_uploader("Upload GeoPackage (.gpkg)", type=["gpkg"])
 data_file = st.file_uploader("Upload Data File (CSV or Excel)", type=["csv", "xlsx"])
+output_name = st.text_input(
+    "Name for the updated GeoPackage (without extension)",
+    value="updated_clean",
+    help="This will also be used for the GeoPackage layer name."
+).strip()
+
+if not output_name:
+    output_name = "updated_clean"
+
+layer_name = output_name.replace(" ", "_")
 
 if gpkg_file and data_file:
 
@@ -77,14 +87,14 @@ if gpkg_file and data_file:
                 temp_path = tmp.name
 
             try:
-                merged_gdf.to_file(temp_path, driver="GPKG")
+                merged_gdf.to_file(temp_path, driver="GPKG", layer=layer_name)
                 with open(temp_path, "rb") as updated:
                     data_bytes = updated.read()
 
                 st.download_button(
                     "⬇ Download Updated GeoPackage",
                     data=data_bytes,
-                    file_name="updated_clean.gpkg",
+                    file_name=f"{output_name}.gpkg",
                     mime="application/geopackage+sqlite3"
                 )
             finally:
