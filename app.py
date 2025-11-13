@@ -1,7 +1,8 @@
 import streamlit as st
 import geopandas as gpd
 import pandas as pd
-import io
+import os
+import tempfile
 
 st.title("📌 Clean GPKG Attribute Filler – No Duplicate Columns")
 
@@ -27,32 +28,61 @@ if gpkg_file and data_file:
     if st.button("Merge Without Duplicates"):
 
         try:
-            # ---- Remove data-file columns that already exist in GPKG ----
-            df_clean = df[[c for c in df.columns if c not in gdf.columns or c == right_key]]
-
-            # ---- Perform merge without keeping duplicate fields ----
+            # ---- Merge while keeping incoming fields separate ----
             merged = gdf.merge(
-                df_clean,
+                df,
                 left_on=left_key,
                 right_on=right_key,
                 how="left",
-                suffixes=("", "")   # IMPORTANT: no _x, no _y
+                suffixes=("", "_incoming")
+            )
+
+            # ---- Overwrite / append attributes without duplicate columns ----
+            incoming_cols = [c for c in df.columns if c != right_key]
+            for col in incoming_cols:
+                incoming_name = f"{col}_incoming"
+
+                if col in gdf.columns:
+                    if incoming_name in merged.columns:
+                        merged[col] = merged[incoming_name].combine_first(merged[col])
+                        merged.drop(columns=[incoming_name], inplace=True)
+                else:
+                    # Column only exists in the data file; keep its values without suffix
+                    if incoming_name in merged.columns:
+                        merged.rename(columns={incoming_name: col}, inplace=True)
+
+            # Drop duplicate join column if user selected different fields
+            if right_key in merged.columns and right_key != left_key:
+                merged.drop(columns=[right_key], inplace=True)
+
+            # Ensure the merged result keeps GeoDataFrame metadata
+            merged_gdf = gpd.GeoDataFrame(
+                merged,
+                geometry=gdf.geometry.name,
+                crs=gdf.crs
             )
 
             st.success("Attributes Merged Successfully ✔")
             st.dataframe(merged.head())
 
             # ---- Export to BytesIO ----
-            buffer = io.BytesIO()
-            merged.to_file(buffer, driver="GPKG")
-            buffer.seek(0)
+            with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp:
+                temp_path = tmp.name
 
-            st.download_button(
-                "⬇ Download Updated GeoPackage",
-                data=buffer,
-                file_name="updated_clean.gpkg",
-                mime="application/geopackage+sqlite3"
-            )
+            try:
+                merged_gdf.to_file(temp_path, driver="GPKG")
+                with open(temp_path, "rb") as updated:
+                    data_bytes = updated.read()
+
+                st.download_button(
+                    "⬇ Download Updated GeoPackage",
+                    data=data_bytes,
+                    file_name="updated_clean.gpkg",
+                    mime="application/geopackage+sqlite3"
+                )
+            finally:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
 
         except Exception as e:
             st.error(f"Error: {e}")
