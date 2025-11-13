@@ -1,7 +1,8 @@
 import streamlit as st
 import geopandas as gpd
 import pandas as pd
-import io
+import os
+import tempfile
 
 st.title("📌 Clean GPKG Attribute Filler – No Duplicate Columns")
 
@@ -39,20 +40,34 @@ if gpkg_file and data_file:
                 suffixes=("", "")   # IMPORTANT: no _x, no _y
             )
 
+            # Ensure the merged result keeps GeoDataFrame metadata
+            merged_gdf = gpd.GeoDataFrame(
+                merged,
+                geometry=gdf.geometry.name,
+                crs=gdf.crs
+            )
+
             st.success("Attributes Merged Successfully ✔")
             st.dataframe(merged.head())
 
             # ---- Export to BytesIO ----
-            buffer = io.BytesIO()
-            merged.to_file(buffer, driver="GPKG")
-            buffer.seek(0)
+            with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp:
+                temp_path = tmp.name
 
-            st.download_button(
-                "⬇ Download Updated GeoPackage",
-                data=buffer,
-                file_name="updated_clean.gpkg",
-                mime="application/geopackage+sqlite3"
-            )
+            try:
+                merged_gdf.to_file(temp_path, driver="GPKG")
+                with open(temp_path, "rb") as updated:
+                    data_bytes = updated.read()
+
+                st.download_button(
+                    "⬇ Download Updated GeoPackage",
+                    data=data_bytes,
+                    file_name="updated_clean.gpkg",
+                    mime="application/geopackage+sqlite3"
+                )
+            finally:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
 
         except Exception as e:
             st.error(f"Error: {e}")
