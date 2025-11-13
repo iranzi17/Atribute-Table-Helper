@@ -4,3 +4,4 @@ geopandas
 pyogrio
 fiona
 shapely
+openpyxl
