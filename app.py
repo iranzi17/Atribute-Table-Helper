@@ -1,162 +1,249 @@
+"""Streamlit app for merging attribute tables into GeoPackages."""
+from __future__ import annotations
+
 import os
 import tempfile
-import zipfile
+from io import BytesIO
 
 import geopandas as gpd
 import pandas as pd
 import streamlit as st
 
 
-def merge_without_duplicates(gdf: gpd.GeoDataFrame, df: pd.DataFrame, left_key: str, right_key: str) -> gpd.GeoDataFrame:
-    merged = gdf.merge(
-        df,
-        left_on=left_key,
-        right_on=right_key,
+st.set_page_config(
+    page_title="GeoPackage Attribute Filler",
+    page_icon="🗂️",
+    layout="centered",
+)
+
+st.markdown(
+    """
+    <style>
+        * { font-family: "Segoe UI", sans-serif; }
+        .main { background-color: #f3f5f9; }
+        .app-container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        .section-box {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 18px;
+            padding: 2rem;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+            border: 1px solid rgba(15, 23, 42, 0.08);
+        }
+        .upload-box {
+            background: #f6f7fb;
+            border: 1px dashed rgba(71, 85, 105, 0.4);
+            border-radius: 16px;
+            padding: 1.5rem;
+        }
+        .join-card {
+            background: #ffffff;
+            border-radius: 16px;
+            padding: 1.5rem;
+            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+        }
+        .download-panel {
+            background: #e6f7f1;
+            border-left: 6px solid #0f9d58;
+            border-radius: 16px;
+            padding: 1.5rem;
+            color: #0f5132;
+        }
+        .step-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 0.6rem;
+            color: #0f172a;
+        }
+        .footer {
+            text-align: center;
+            color: #475569;
+            margin-top: 3rem;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+def read_geopackage(uploaded_file: BytesIO) -> gpd.GeoDataFrame:
+    """Read an uploaded GeoPackage file and return a GeoDataFrame."""
+    if uploaded_file is None:
+        raise ValueError("Please upload a GeoPackage file.")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".gpkg") as tmp:
+        tmp.write(uploaded_file.getbuffer())
+        temp_path = tmp.name
+
+    try:
+        return gpd.read_file(temp_path)
+    finally:
+        os.remove(temp_path)
+
+
+def read_table(uploaded_file: BytesIO) -> pd.DataFrame:
+    """Read a CSV or Excel file into a pandas DataFrame."""
+    if uploaded_file is None:
+        raise ValueError("Please upload a spreadsheet file.")
+
+    file_name = uploaded_file.name.lower()
+    uploaded_file.seek(0)
+    if file_name.endswith(".csv"):
+        return pd.read_csv(uploaded_file)
+    if file_name.endswith(".xlsx"):
+        return pd.read_excel(uploaded_file, engine="openpyxl")
+
+    raise ValueError("Unsupported file type. Please upload CSV or Excel files.")
+
+
+def merge_attributes(
+    base_gdf: gpd.GeoDataFrame,
+    attr_df: pd.DataFrame,
+    left_field: str,
+    right_field: str,
+) -> gpd.GeoDataFrame:
+    """Merge attribute table into GeoDataFrame without duplicate columns."""
+
+    if left_field not in base_gdf.columns:
+        raise KeyError(f"'{left_field}' not found in GeoPackage fields.")
+    if right_field not in attr_df.columns:
+        raise KeyError(f"'{right_field}' not found in spreadsheet fields.")
+
+    duplicate_columns = [col for col in attr_df.columns if col in base_gdf.columns]
+    duplicate_columns = [col for col in duplicate_columns if col != right_field]
+
+    cleaned_df = attr_df.drop(columns=duplicate_columns, errors="ignore").copy()
+
+    if left_field == right_field:
+        join_column = "__join_field__"
+        cleaned_df.rename(columns={right_field: join_column}, inplace=True)
+    else:
+        join_column = right_field
+
+    merged = base_gdf.merge(
+        cleaned_df,
         how="left",
-        suffixes=("", "_incoming"),
+        left_on=left_field,
+        right_on=join_column,
     )
 
-    incoming_cols = [c for c in df.columns if c != right_key]
-    for col in incoming_cols:
-        incoming_name = f"{col}_incoming"
-        if col in gdf.columns:
-            if incoming_name in merged.columns:
-                merged[col] = merged[incoming_name].combine_first(merged[col])
-                merged.drop(columns=[incoming_name], inplace=True)
-        elif incoming_name in merged.columns:
-            merged.rename(columns={incoming_name: col}, inplace=True)
+    for col in (right_field, "__join_field__"):
+        if col in merged.columns and col != left_field:
+            merged = merged.drop(columns=[col])
 
-    if right_key in merged.columns and right_key != left_key:
-        merged.drop(columns=[right_key], inplace=True)
-
-    return gpd.GeoDataFrame(merged, geometry=gdf.geometry.name, crs=gdf.crs)
+    return gpd.GeoDataFrame(merged, geometry=base_gdf.geometry.name, crs=base_gdf.crs)
 
 
-def read_pairs_from_zip(uploaded_zip):
-    dataset_pairs = []
-    with tempfile.TemporaryDirectory() as tmpdir:
-        zip_path = os.path.join(tmpdir, uploaded_zip.name)
-        with open(zip_path, "wb") as tmp_zip:
-            tmp_zip.write(uploaded_zip.getbuffer())
+def geopackage_to_buffer(gdf: gpd.GeoDataFrame, layer_name: str) -> BytesIO:
+    """Write GeoDataFrame to a GeoPackage stored inside a BytesIO buffer."""
+    safe_layer = layer_name.replace(" ", "_") or "merged_layer"
+    buffer = BytesIO()
 
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(tmpdir)
+    with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp:
+        temp_path = tmp.name
 
-        paired_files = {}
-        for root, _, files in os.walk(tmpdir):
-            for file in files:
-                base, ext = os.path.splitext(file)
-                ext_lower = ext.lower()
-                full_path = os.path.join(root, file)
-                if ext_lower == ".gpkg":
-                    paired_files.setdefault(base, {})["gpkg"] = full_path
-                elif ext_lower in [".csv", ".xlsx"]:
-                    paired_files.setdefault(base, {})["data"] = full_path
+    try:
+        gdf.to_file(temp_path, driver="GPKG", layer=safe_layer)
+        with open(temp_path, "rb") as f:
+            buffer.write(f.read())
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
-        for base_name, paths in paired_files.items():
-            if "gpkg" not in paths or "data" not in paths:
-                continue
-
-            gdf = gpd.read_file(paths["gpkg"])
-            data_path = paths["data"]
-            if data_path.lower().endswith(".csv"):
-                df = pd.read_csv(data_path)
-            else:
-                df = pd.read_excel(data_path)
-
-            dataset_pairs.append(
-                {
-                    "base": base_name,
-                    "gdf": gdf,
-                    "df": df,
-                    "source_zip": uploaded_zip.name,
-                }
-            )
-
-    return dataset_pairs
+    buffer.seek(0)
+    return buffer
 
 
-st.title("📌 Clean GPKG Attribute Filler – No Duplicate Columns")
+st.markdown('<div class="app-container">', unsafe_allow_html=True)
+st.title("🗂️ GeoPackage Attribute Filler")
+st.subheader("Clean, professional tool for GIS attribute merging.")
+st.markdown("<br>", unsafe_allow_html=True)
 
-st.write(
-    "Upload one or more ZIP archives. Each ZIP should contain a GeoPackage and a matching "
-    "CSV/Excel file that share the same base name (e.g., `roads.gpkg` + `roads.xlsx`)."
+# Step 1 – Upload files
+st.markdown('<div class="section-box">', unsafe_allow_html=True)
+st.markdown('<div class="step-title">Step 1 – Upload files</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="upload-box">Upload a GeoPackage and a spreadsheet (CSV or Excel). They should share a common key for joining.</div>',
+    unsafe_allow_html=True,
 )
+st.markdown("<br>", unsafe_allow_html=True)
 
-uploaded_zips = st.file_uploader(
-    "Upload zipped GeoPackage + spreadsheet bundles",
-    type=["zip"],
-    accept_multiple_files=True,
-)
+col1, col2 = st.columns(2)
+with col1:
+    gpkg_file = st.file_uploader("GeoPackage (.gpkg)", type=["gpkg"], key="gpkg")
+with col2:
+    table_file = st.file_uploader("Spreadsheet (.csv, .xlsx)", type=["csv", "xlsx"], key="table")
 
-all_datasets = []
-if uploaded_zips:
-    for uploaded_zip in uploaded_zips:
-        try:
-            all_datasets.extend(read_pairs_from_zip(uploaded_zip))
-        except zipfile.BadZipFile:
-            st.error(f"{uploaded_zip.name} is not a valid ZIP archive.")
-        except Exception as exc:
-            st.error(f"Failed to read {uploaded_zip.name}: {exc}")
+st.markdown("</div>", unsafe_allow_html=True)
+st.markdown("<br>", unsafe_allow_html=True)
 
-if not uploaded_zips:
-    st.info("Start by uploading at least one ZIP file.")
-elif not all_datasets:
-    st.warning("No valid GeoPackage + spreadsheet pairs were found in the uploaded ZIPs.")
+base_gdf = None
+attr_df = None
+if gpkg_file and table_file:
+    try:
+        base_gdf = read_geopackage(gpkg_file)
+        attr_df = read_table(table_file)
+        st.success(
+            f"Loaded {len(base_gdf):,} features and {len(attr_df):,} attribute rows successfully."
+        )
+    except Exception as exc:
+        st.error(f"Unable to load files: {exc}")
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# Step 2 – Select join fields
+if base_gdf is not None and attr_df is not None:
+    st.markdown('<div class="section-box">', unsafe_allow_html=True)
+    st.markdown('<div class="step-title">Step 2 – Select join fields</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="join-card">Choose the matching fields from each dataset. Fields already present in the GeoPackage will be ignored from the spreadsheet to prevent duplicates.</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    left_field = st.selectbox("Field in GeoPackage", base_gdf.columns.tolist())
+    right_field = st.selectbox("Field in Spreadsheet", attr_df.columns.tolist())
+    st.markdown("</div>", unsafe_allow_html=True)
 else:
-    st.success(f"Loaded {len(all_datasets)} dataset(s) from the uploaded ZIP files.")
-    st.write(
-        "Configure the join fields and output names for each dataset, then click "
-        "`Merge All Bundles` to generate the updated GeoPackages."
-    )
+    left_field = right_field = None
 
-    for idx, dataset in enumerate(all_datasets):
-        with st.expander(f"Dataset {idx + 1}: {dataset['base']} ({dataset['source_zip']})", expanded=True):
-            st.selectbox(
-                "Field in GeoPackage",
-                dataset["gdf"].columns,
-                key=f"left_key_{idx}",
+st.markdown("<br>", unsafe_allow_html=True)
+
+# Step 3 – Merge & download
+if base_gdf is not None and attr_df is not None and left_field and right_field:
+    st.markdown('<div class="section-box">', unsafe_allow_html=True)
+    st.markdown('<div class="step-title">Step 3 – Merge & download</div>', unsafe_allow_html=True)
+
+    default_output_name = os.path.splitext(gpkg_file.name)[0] + "_merged"
+    output_name = st.text_input("Output file name", value=default_output_name)
+
+    if st.button("Merge attributes", use_container_width=True):
+        try:
+            merged_gdf = merge_attributes(base_gdf, attr_df, left_field, right_field)
+            buffer = geopackage_to_buffer(merged_gdf, output_name)
+
+            st.markdown(
+                '<div class="download-panel">✅ Attributes merged successfully. Download the enriched GeoPackage below.</div>',
+                unsafe_allow_html=True,
             )
-            st.selectbox(
-                "Field in Spreadsheet",
-                dataset["df"].columns,
-                key=f"right_key_{idx}",
+            st.download_button(
+                label=f"Download {output_name}.gpkg",
+                data=buffer,
+                file_name=f"{output_name}.gpkg",
+                mime="application/geopackage+sqlite3",
+                use_container_width=True,
             )
-            st.text_input(
-                "Output file name (without extension)",
-                value=f"{dataset['base']}_updated",
-                key=f"output_name_{idx}",
-            )
+            st.dataframe(merged_gdf.head())
+        except Exception as exc:
+            st.error(f"Merging failed: {exc}")
 
-    if st.button("Merge All Bundles"):
-        for idx, dataset in enumerate(all_datasets):
-            left_key = st.session_state.get(f"left_key_{idx}")
-            right_key = st.session_state.get(f"right_key_{idx}")
-            output_name = st.session_state.get(f"output_name_{idx}", "").strip() or f"{dataset['base']}_updated"
-            layer_name = output_name.replace(" ", "_")
+    st.markdown("</div>", unsafe_allow_html=True)
 
-            try:
-                merged_gdf = merge_without_duplicates(dataset["gdf"], dataset["df"], left_key, right_key)
-
-                with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp:
-                    temp_path = tmp.name
-
-                try:
-                    merged_gdf.to_file(temp_path, driver="GPKG", layer=layer_name)
-                    with open(temp_path, "rb") as updated:
-                        data_bytes = updated.read()
-
-                    st.success(f"{output_name}.gpkg is ready")
-                    st.dataframe(merged_gdf.head())
-                    st.download_button(
-                        f"⬇ Download {output_name}.gpkg",
-                        data=data_bytes,
-                        file_name=f"{output_name}.gpkg",
-                        mime="application/geopackage+sqlite3",
-                    )
-                finally:
-                    if os.path.exists(temp_path):
-                        os.remove(temp_path)
-
-            except Exception as exc:
-                st.error(f"Failed to merge dataset {dataset['base']}: {exc}")
+st.markdown("<br>", unsafe_allow_html=True)
+st.markdown(
+    '<div class="footer">Developed by Eng. IRANZI Prince Jean Claude</div>',
+    unsafe_allow_html=True,
+)
+st.markdown("</div>", unsafe_allow_html=True)
