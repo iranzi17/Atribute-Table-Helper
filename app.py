@@ -28,16 +28,38 @@ if gpkg_file and data_file:
     if st.button("Merge Without Duplicates"):
 
         try:
-            # ---- Remove data-file columns that already exist in GPKG ----
-            df_clean = df[[c for c in df.columns if c not in gdf.columns or c == right_key]]
-
-            # ---- Perform merge without keeping duplicate fields ----
+            # ---- Merge while keeping incoming fields separate ----
             merged = gdf.merge(
-                df_clean,
+                df,
                 left_on=left_key,
                 right_on=right_key,
                 how="left",
-                suffixes=("", "")   # IMPORTANT: no _x, no _y
+                suffixes=("", "_incoming")
+            )
+
+            # ---- Overwrite / append attributes without duplicate columns ----
+            incoming_cols = [c for c in df.columns if c != right_key]
+            for col in incoming_cols:
+                incoming_name = f"{col}_incoming"
+
+                if col in gdf.columns:
+                    if incoming_name in merged.columns:
+                        merged[col] = merged[incoming_name].combine_first(merged[col])
+                        merged.drop(columns=[incoming_name], inplace=True)
+                else:
+                    # Column only exists in the data file; keep its values without suffix
+                    if incoming_name in merged.columns:
+                        merged.rename(columns={incoming_name: col}, inplace=True)
+
+            # Drop duplicate join column if user selected different fields
+            if right_key in merged.columns and right_key != left_key:
+                merged.drop(columns=[right_key], inplace=True)
+
+            # Ensure the merged result keeps GeoDataFrame metadata
+            merged_gdf = gpd.GeoDataFrame(
+                merged,
+                geometry=gdf.geometry.name,
+                crs=gdf.crs
             )
 
             # Ensure the merged result keeps GeoDataFrame metadata
