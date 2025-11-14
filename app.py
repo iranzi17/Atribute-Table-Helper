@@ -331,11 +331,18 @@ with st.container():
             "Paste tabular data (Ctrl+C from Excel → Ctrl+V here). Pasted data will be used in preference to uploaded files."
         )
         try:
-            # Start with an empty DataFrame; `st.data_editor` supports dynamic rows/cols.
-            empty_df_for_editor = pd.DataFrame()
-            edited = st.data_editor(empty_df_for_editor, num_rows="dynamic", key="pasted_data_editor")
-            # If the user pasted something, `edited` will contain data. Consider it present
-            # if it has at least one non-empty cell.
+            # Provide a sheet-like template with multiple empty columns so Streamlit
+            # enables full Excel-style pasting behavior. Use pd.NA so rows are
+            # considered empty until the user pastes content.
+            template_cols = [f"col_{i}" for i in range(1, 9)]  # 8 blank columns
+            template_rows = 10
+            empty_template = pd.DataFrame(
+                [[pd.NA] * len(template_cols) for _ in range(template_rows)],
+                columns=template_cols,
+            )
+
+            edited = st.data_editor(empty_template, num_rows="dynamic", key="pasted_data_editor")
+            # Detect pasted content by checking for any non-empty rows
             if isinstance(edited, pd.DataFrame) and not edited.dropna(how="all").empty:
                 pasted_df = clean_empty_rows(edited)
                 st.success("Pasted data detected — it will be used for merging.")
