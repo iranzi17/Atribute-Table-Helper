@@ -192,31 +192,6 @@ def load_reference_preview(workbook_path: Path, sheet_name: str, max_rows: int =
         return pd.DataFrame()
 
 
-REFERENCE_DATA_DIR = Path(__file__).parent / "reference_data"
-
-
-def get_reference_workbooks():
-    """Return mapping of workbook label -> path for bundled Excel files."""
-
-    if not REFERENCE_DATA_DIR.exists():
-        return {}
-
-    workbooks = {}
-    for workbook in sorted(REFERENCE_DATA_DIR.glob("*.xlsx")):
-        workbooks[workbook.name] = workbook
-    return workbooks
-
-
-def get_sheet_names(workbook_path: Path):
-    """Return available sheet names for the selected workbook."""
-
-    try:
-        excel_file = pd.ExcelFile(workbook_path)
-        return excel_file.sheet_names
-    except Exception:
-        return []
-
-
 st.set_page_config(
     page_title="Clean GPKG Attribute Filler",
     page_icon="🗂️",
@@ -333,33 +308,48 @@ with st.container():
         st.markdown(
             "Paste raw tabular data (Ctrl+C from Excel → Ctrl+V here). The app will parse TSV/CSV, show it for editing, and use it for merging."
         )
-        try:
-            paste_text = st.text_area("Paste tabular text here", value="", placeholder="Paste rows from Excel or CSV/TSV here", height=160, key="pasted_text_area")
-            if isinstance(paste_text, str) and paste_text.strip():
-                parsed = None
-                # Try autodetecting separator first
-                try:
-                    parsed = pd.read_csv(StringIO(paste_text), sep=None, engine="python")
-                except Exception:
-                    # Fallbacks: try tab, then comma
-                    try:
-                        parsed = pd.read_csv(StringIO(paste_text), sep="\t")
-                    except Exception:
-                        try:
-                            parsed = pd.read_csv(StringIO(paste_text), sep=",")
-                        except Exception:
-                            parsed = None
+        paste_text = st.text_area(
+            "Paste your data here (TSV/CSV format)",
+            height=150,
+            placeholder="Paste tabular data here...",
+        )
 
-                if isinstance(parsed, pd.DataFrame):
-                    # Show parsed DataFrame in an editable grid so users can tweak before merging
-                    edited = st.data_editor(parsed, num_rows="dynamic", key="pasted_data_editor")
-                    if isinstance(edited, pd.DataFrame) and not edited.dropna(how="all").empty:
-                        pasted_df = clean_empty_rows(edited)
-                        st.success("Pasted data detected — it will be used for merging.")
-                else:
-                    st.warning("Unable to parse pasted text as a table. Please ensure it's tabular (TSV/CSV) or paste directly from Excel cells.")
-        except Exception:
-            pasted_df = None
+        if isinstance(paste_text, str) and paste_text.strip():
+            parsed = None
+            # Try autodetecting separator first
+            try:
+                parsed = pd.read_csv(StringIO(paste_text), sep=None, engine="python")
+            except Exception:
+                # Fallbacks: try tab, then comma
+                try:
+                    parsed = pd.read_csv(StringIO(paste_text), sep="\t")
+                except Exception:
+                    try:
+                        parsed = pd.read_csv(StringIO(paste_text), sep=",")
+                    except Exception:
+                        parsed = None
+
+            if isinstance(parsed, pd.DataFrame):
+                # Show parsed DataFrame in an editable grid so users can tweak before merging
+                edited = st.data_editor(parsed, num_rows="dynamic", key="pasted_data_editor")
+                if isinstance(edited, pd.DataFrame) and not edited.dropna(how="all").empty:
+                    pasted_df = clean_empty_rows(edited)
+                    # Persist pasted DataFrame into session_state so it survives reruns
+                    try:
+                        st.session_state["df_from_paste"] = pasted_df
+                    except Exception:
+                        # best-effort; continue without persistence on failure
+                        pass
+                    st.success("Pasted data detected — it will be used for merging.")
+            else:
+                st.warning("Unable to parse pasted text as a table. Please ensure it's tabular (TSV/CSV) or paste directly from Excel cells.")
+        # If the text area is empty, remove any previously saved pasted DF from session state
+        if not paste_text or not str(paste_text).strip():
+            if "df_from_paste" in st.session_state:
+                try:
+                    del st.session_state["df_from_paste"]
+                except Exception:
+                    pass
 
     if data_source == "Upload CSV/Excel file":
         uploaded_data_file = st.file_uploader(
@@ -574,9 +564,10 @@ if gpkg_file and data_ready:
     gdf = gpd.read_file(gpkg_file)
     st.success("GeoPackage Loaded ✔")
 
-    # Prefer pasted data if available; otherwise fall back to uploaded file or stored reference
-    if pasted_df is not None:
-        df = pasted_df
+    # Prefer session-stored pasted DF if available; otherwise fall back to uploaded file or stored reference
+    df_from_paste = st.session_state.get("df_from_paste")
+    if isinstance(df_from_paste, pd.DataFrame) and not df_from_paste.dropna(how="all").empty:
+        df = df_from_paste
         st.success("Using pasted data ✔")
     elif uploaded_data_file is not None:
         try:
