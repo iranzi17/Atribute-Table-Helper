@@ -210,9 +210,17 @@ st.markdown(
         font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
         background: #f4f6f9;
     }
+    .main {
+        padding: 0 !important;
+    }
     .main > div {
-        max-width: 100%;
-        padding: 0;
+        max-width: 100% !important;
+        padding: 0 !important;
+    }
+    /* Full width for streamlit elements */
+    [data-testid="stMainBlockContainer"] {
+        max-width: 100% !important;
+        padding: 0 !important;
     }
     
     /* Hero Section - Two Column */
@@ -262,16 +270,32 @@ st.markdown(
     /* Hero Right Column - Product Title + Rwanda Map Background */
     .hero-right {
         flex: 0 0 65%;
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.98) 100%),
-                    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 500'%3E%3Cpath d='M300 200 Q400 150 500 200 T700 200 L700 300 Q600 350 500 300 T300 300 Z' fill='%230d47a1' opacity='0.05'/%3E%3Ccircle cx='350' cy='250' r='80' fill='%231565c0' opacity='0.03'/%3E%3Ccircle cx='600' cy='280' r='60' fill='%232196f3' opacity='0.04'/%3E%3C/svg%3E");
+        background-image: url("app/reference_data/rwanda_small_map.jpg");
         background-size: cover;
         background-position: center;
+        background-attachment: fixed;
         display: flex;
         flex-direction: column;
         justify-content: center;
         align-items: center;
         padding: 3rem 2.5rem;
         text-align: center;
+        position: relative;
+    }
+    .hero-right::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 250, 252, 0.95) 100%);
+        z-index: 1;
+    }
+    .hero-right h1,
+    .hero-right .subtitle {
+        position: relative;
+        z-index: 2;
     }
     .hero-right h1 {
         font-size: 2.4rem;
