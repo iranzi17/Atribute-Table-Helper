@@ -87,6 +87,8 @@ Smart tools for smart engineers.
     unsafe_allow_html=True,
 )
 
+st.title("📌 Clean GPKG Attribute Filler – No Duplicate Columns")
+
 # ---- Single file workflow --------------------------------------------------
 with st.container():
     st.markdown('<div class="app-card">', unsafe_allow_html=True)
