@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 from openpyxl import load_workbook
 import json
+from io import StringIO
 
 
 REFERENCE_DATA_DIR = Path(__file__).parent / "reference_data"
@@ -324,28 +325,39 @@ with st.container():
     reference_path = None
     workbook_label = None
 
-    # Optional: allow pasting tabular data directly from Excel into an editable grid.
+    # Optional: allow pasting raw tabular text (Ctrl+C from Excel → Ctrl+V here).
+    # The pasted text is parsed (TSV/CSV autodetect), shown in a sheet-like
+    # `st.data_editor` for editing, cleaned, and then used in preference to uploaded files.
     pasted_df = None
-    with st.expander("Or paste data from Excel / clipboard (optional)"):
+    with st.expander("Or paste raw tabular text (optional)"):
         st.markdown(
-            "Paste tabular data (Ctrl+C from Excel → Ctrl+V here). Pasted data will be used in preference to uploaded files."
+            "Paste raw tabular data (Ctrl+C from Excel → Ctrl+V here). The app will parse TSV/CSV, show it for editing, and use it for merging."
         )
         try:
-            # Provide a sheet-like template with multiple empty columns so Streamlit
-            # enables full Excel-style pasting behavior. Use pd.NA so rows are
-            # considered empty until the user pastes content.
-            template_cols = [f"col_{i}" for i in range(1, 9)]  # 8 blank columns
-            template_rows = 10
-            empty_template = pd.DataFrame(
-                [[pd.NA] * len(template_cols) for _ in range(template_rows)],
-                columns=template_cols,
-            )
+            paste_text = st.text_area("Paste tabular text here", value="", placeholder="Paste rows from Excel or CSV/TSV here", height=160, key="pasted_text_area")
+            if isinstance(paste_text, str) and paste_text.strip():
+                parsed = None
+                # Try autodetecting separator first
+                try:
+                    parsed = pd.read_csv(StringIO(paste_text), sep=None, engine="python")
+                except Exception:
+                    # Fallbacks: try tab, then comma
+                    try:
+                        parsed = pd.read_csv(StringIO(paste_text), sep="\t")
+                    except Exception:
+                        try:
+                            parsed = pd.read_csv(StringIO(paste_text), sep=",")
+                        except Exception:
+                            parsed = None
 
-            edited = st.data_editor(empty_template, num_rows="dynamic", key="pasted_data_editor")
-            # Detect pasted content by checking for any non-empty rows
-            if isinstance(edited, pd.DataFrame) and not edited.dropna(how="all").empty:
-                pasted_df = clean_empty_rows(edited)
-                st.success("Pasted data detected — it will be used for merging.")
+                if isinstance(parsed, pd.DataFrame):
+                    # Show parsed DataFrame in an editable grid so users can tweak before merging
+                    edited = st.data_editor(parsed, num_rows="dynamic", key="pasted_data_editor")
+                    if isinstance(edited, pd.DataFrame) and not edited.dropna(how="all").empty:
+                        pasted_df = clean_empty_rows(edited)
+                        st.success("Pasted data detected — it will be used for merging.")
+                else:
+                    st.warning("Unable to parse pasted text as a table. Please ensure it's tabular (TSV/CSV) or paste directly from Excel cells.")
         except Exception:
             pasted_df = None
 
