@@ -14,6 +14,54 @@ SUPPORTED_REFERENCE_EXTENSIONS = (".xlsx", ".xlsm")
 PREVIEW_ROW_COUNT = 20
 
 
+def _reset_stream(stream):
+    """Seek to the beginning of a stream if possible."""
+
+    if hasattr(stream, "seek"):
+        try:
+            stream.seek(0)
+        except Exception:
+            pass
+
+
+def read_tabular_data(source):
+    """Load a CSV/Excel file, handling common encoding issues for CSV uploads."""
+
+    if isinstance(source, (str, Path)):
+        suffix = Path(source).suffix.lower()
+    else:
+        suffix = Path(source.name).suffix.lower()
+
+    if suffix == ".csv":
+        # First, behave exactly like the previous implementation by allowing
+        # pandas to pick its default encoding (UTF-8). This ensures that
+        # uploads that already worked continue to do so without any changes.
+        _reset_stream(source)
+        try:
+            return pd.read_csv(source)
+        except UnicodeDecodeError:
+            pass
+
+        # If a UnicodeDecodeError occurs, iterate through a few common
+        # fallbacks before resorting to a lossy-but-safe decode.
+        encodings = ("utf-8-sig", "latin-1")
+        for encoding in encodings:
+            _reset_stream(source)
+            try:
+                return pd.read_csv(source, encoding=encoding)
+            except UnicodeDecodeError:
+                continue
+
+        _reset_stream(source)
+        return pd.read_csv(source, encoding="utf-8", errors="replace")
+
+    if suffix in {".xlsx", ".xlsm", ".xls"}:
+        _reset_stream(source)
+        return pd.read_excel(source)
+
+    raise ValueError(f"Unsupported file type: {suffix}")
+
+
 def get_reference_workbooks():
     """Return mapping of workbook label -> path for bundled Excel files."""
 
@@ -324,10 +372,10 @@ def read_pairs_from_zip(uploaded_zip):
 
             gdf = gpd.read_file(paths["gpkg"])
             data_path = paths["data"]
-            if data_path.lower().endswith(".csv"):
-                df = pd.read_csv(data_path)
-            else:
-                df = pd.read_excel(data_path)
+            try:
+                df = read_tabular_data(data_path)
+            except Exception:
+                continue
 
             dataset_pairs.append(
                 {
@@ -350,10 +398,11 @@ if gpkg_file and data_ready:
     st.success("GeoPackage Loaded ✔")
 
     if uploaded_data_file is not None:
-        if uploaded_data_file.name.endswith(".csv"):
-            df = pd.read_csv(uploaded_data_file)
-        else:
-            df = pd.read_excel(uploaded_data_file)
+        try:
+            df = read_tabular_data(uploaded_data_file)
+        except Exception as exc:
+            st.error(f"Unable to read uploaded data file: {exc}")
+            st.stop()
         st.success("Data Loaded ✔")
     elif reference_path and reference_sheet:
         df = pd.read_excel(reference_path, sheet_name=reference_sheet)
