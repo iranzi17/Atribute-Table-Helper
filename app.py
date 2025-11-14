@@ -52,6 +52,35 @@ def set_saved_name(equipment_type: str, name: str, memory: dict):
 # Load memory on startup
 name_memory = load_name_memory()
 
+# Persistent UI settings (hero layout etc.)
+UI_SETTINGS_PATH = Path(__file__).parent / "ui_settings.json"
+
+
+def load_ui_settings() -> dict:
+    try:
+        if UI_SETTINGS_PATH.exists():
+            with open(UI_SETTINGS_PATH, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+    except Exception:
+        return {}
+    return {}
+
+
+def save_ui_settings(mapping: dict):
+    try:
+        with open(UI_SETTINGS_PATH, "w", encoding="utf-8") as fh:
+            json.dump(mapping, fh, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+# load UI settings
+ui_settings = load_ui_settings()
+
+# Determine hero height (px) from saved UI settings, fall back to 320
+DEFAULT_HERO_HEIGHT = 320
+ui_hero_height = int(ui_settings.get("hero_height", DEFAULT_HERO_HEIGHT))
+
 
 def _reset_stream(stream):
     """Seek to the beginning of a stream if possible."""
@@ -198,8 +227,7 @@ st.set_page_config(
     layout="centered",
 )
 
-st.markdown(
-    """
+st.markdown("""
     <style>
     * {
         margin: 0;
@@ -230,7 +258,7 @@ st.markdown(
     .hero-container {
         display: flex;
         width: 100%;
-        min-height: 320px;
+        min-height: """ + str(ui_hero_height) + """px;
         margin-bottom: 2.5rem;
         box-shadow: 0 8px 20px rgba(13, 71, 161, 0.15);
         border-radius: 8px;
@@ -527,6 +555,21 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+
+# Small UI to let users resize the hero and persist the setting
+with st.expander("UI Settings", expanded=False):
+    try:
+        hero_height_new = st.slider(
+            "Hero height (px)", min_value=200, max_value=800, value=ui_hero_height, step=10, key="hero_height_slider"
+        )
+        if st.button("Save UI settings", key="save_ui_settings_btn"):
+            ui_settings["hero_height"] = int(hero_height_new)
+            save_ui_settings(ui_settings)
+            st.success("Saved UI settings")
+            st.experimental_rerun()
+    except Exception:
+        # UI should not crash the app; silently ignore
+        pass
 
 # ---- Single file workflow --------------------------------------------------
 reference_workbooks = get_reference_workbooks()
