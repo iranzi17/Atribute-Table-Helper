@@ -100,6 +100,28 @@ def read_tabular_data(source):
     raise ValueError(f"Unsupported file type: {suffix}")
 
 
+def clean_empty_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop fully-empty rows and forward-fill partial empty rows.
+
+    This helps spreadsheets where repeated groups omit repeated values
+    (e.g., Substation/Bay/Name) on subsequent rows. Behaves as a best-effort
+    preprocessing step and leaves non-DataFrame inputs untouched.
+    """
+    try:
+        if not isinstance(df, pd.DataFrame):
+            return df
+        # Remove rows that are completely empty
+        df = df.dropna(how="all")
+        if df.empty:
+            return df
+        # Forward-fill remaining blanks so grouped rows inherit prior values
+        df = df.ffill()
+        return df
+    except Exception:
+        # On any failure, return the original DF to avoid breaking the workflow
+        return df
+
+
 def get_reference_workbooks():
     """Return mapping of workbook label -> path for bundled Excel files."""
 
@@ -491,6 +513,7 @@ def read_pairs_from_zip(uploaded_zip):
             data_path = paths["data"]
             try:
                 df = read_tabular_data(data_path)
+                df = clean_empty_rows(df)
             except Exception:
                 continue
 
@@ -517,12 +540,14 @@ if gpkg_file and data_ready:
     if uploaded_data_file is not None:
         try:
             df = read_tabular_data(uploaded_data_file)
+            df = clean_empty_rows(df)
         except Exception as exc:
             st.error(f"Unable to read uploaded data file: {exc}")
             st.stop()
         st.success("Data Loaded ✔")
     elif reference_path and reference_sheet:
         df = pd.read_excel(reference_path, sheet_name=reference_sheet)
+        df = clean_empty_rows(df)
         st.success(
             f"Reference workbook loaded ✔ ({workbook_label} • sheet: {reference_sheet})"
         )
