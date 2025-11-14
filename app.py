@@ -201,55 +201,181 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
     .stApp {
         font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
-        background: #f3f6fb;
+        background: #f4f6f9;
     }
     .main > div {
-        padding-top: 1rem;
+        max-width: 100%;
+        padding: 2rem;
     }
-    .app-card {
+    
+    /* Header Box - Professional landing section */
+    .header-box {
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        color: #ffffff;
+        padding: 3rem 2rem;
+        border-radius: 12px;
+        margin-bottom: 2.5rem;
+        box-shadow: 0 8px 16px rgba(30, 60, 114, 0.2);
+    }
+    .header-box h1 {
+        font-size: 2.5rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+        letter-spacing: -0.5px;
+    }
+    .header-box h3 {
+        font-size: 1.3rem;
+        font-weight: 500;
+        margin-bottom: 1rem;
+        color: #e0e7ff;
+    }
+    .header-box p {
+        font-size: 1rem;
+        line-height: 1.6;
+        color: #c7d2e0;
+    }
+    
+    /* Section Box - Main workflow containers */
+    .section-box {
         background: #ffffff;
         padding: 2rem;
-        border-radius: 18px;
-        box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
-        border: 1px solid rgba(15, 23, 42, 0.06);
-        margin-bottom: 1.5rem;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+        border-left: 4px solid #2a5298;
+        margin-bottom: 2rem;
     }
-    .app-card h3 {
-        margin-top: 0;
-        margin-bottom: 1.2rem;
-        font-size: 1.35rem;
+    .section-box.alt {
+        border-left-color: #5a67d8;
+    }
+    .section-box.tertiary {
+        border-left-color: #3b82f6;
+    }
+    
+    /* Section Title */
+    .section-title {
+        font-size: 1.4rem;
         font-weight: 600;
         color: #1f2a37;
+        margin-bottom: 1.2rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
     }
-    .stFileUploader, .stTextInput, .stSelectbox, .stButton button {
+    .section-title::before {
+        content: "";
+        display: inline-block;
+        width: 4px;
+        height: 1.4rem;
+        background: #2a5298;
+        border-radius: 2px;
+    }
+    
+    /* Subsection text */
+    .section-subtext {
+        color: #4b5563;
+        margin-bottom: 1.5rem;
+        font-size: 0.95rem;
+        line-height: 1.5;
+    }
+    
+    /* File Uploader styling */
+    .stFileUploader {
         border-radius: 12px !important;
     }
     .stFileUploader > div {
-        border-radius: 16px;
-        border: 2px dashed rgba(37, 99, 235, 0.3);
-        padding: 1rem;
-        background: rgba(59, 130, 246, 0.05);
+        border-radius: 12px !important;
+        border: 2px dashed #3b82f6 !important;
+        padding: 1.5rem !important;
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(79, 172, 254, 0.02) 100%) !important;
     }
-    .stTextInput > div > div, .stSelectbox > div > div {
-        border-radius: 12px;
+    
+    /* Inputs and Selectbox */
+    .stTextInput > div > div,
+    .stSelectbox > div > div,
+    .stDataEditor > div {
+        border-radius: 8px !important;
+        border: 1px solid #e5e7eb !important;
     }
-    .section-subtext {
-        color: #4b5563;
-        margin-bottom: 1rem;
+    .stTextInput > div > div:focus-within,
+    .stSelectbox > div > div:focus-within {
+        border-color: #2a5298 !important;
+        box-shadow: 0 0 0 3px rgba(42, 82, 152, 0.1) !important;
     }
+    
+    /* Radio button styling */
+    .stRadio > label {
+        font-weight: 500;
+        color: #1f2a37;
+    }
+    .stRadio > div {
+        gap: 1rem;
+    }
+    
+    /* Button styling */
     .stButton button {
         font-weight: 600;
-        padding: 0.6rem 1.4rem;
-        border-radius: 12px;
+        padding: 0.75rem 1.5rem !important;
+        border-radius: 8px !important;
+        background: linear-gradient(135deg, #2a5298 0%, #3b82f6 100%) !important;
+        color: #ffffff !important;
+        border: none !important;
+        transition: all 0.3s ease;
     }
-    footer {visibility: hidden;}
+    .stButton button:hover {
+        box-shadow: 0 4px 12px rgba(42, 82, 152, 0.3);
+        transform: translateY(-2px);
+    }
+    
+    /* Success/Warning/Info messages */
+    .stSuccess, .stWarning, .stInfo {
+        border-radius: 8px !important;
+        padding: 1rem !important;
+    }
+    
+    /* Expander styling */
+    .streamlit-expanderHeader {
+        background-color: #f9fafb;
+        border-radius: 8px;
+        font-weight: 600;
+        color: #1f2a37;
+    }
+    
+    /* Data editor styling */
+    .stDataEditor {
+        border-radius: 8px !important;
+    }
+    
+    /* Footer */
+    footer {
+        visibility: hidden;
+    }
     .custom-footer {
         text-align: center;
-        padding: 1.5rem 0 0.5rem;
+        padding: 2rem 0 1rem;
         color: #6b7280;
-        font-size: 0.95rem;
+        font-size: 0.9rem;
+        border-top: 1px solid #e5e7eb;
+        margin-top: 3rem;
+    }
+    
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+        .header-box h1 {
+            font-size: 2rem;
+        }
+        .section-box {
+            padding: 1.5rem;
+        }
+        .main > div {
+            padding: 1rem;
+        }
     }
     </style>
     """,
@@ -258,16 +384,15 @@ st.markdown(
 
 st.markdown(
     """
-<h1 style='font-weight:700; font-size:34px; margin-bottom:-5px;'>🌍 GeoData Fusion</h1>
-<h3 style='color:#555; font-weight:500; margin-top:5px;'>Welcome to a smarter way to harmonize your GeoPackage data.</h3>
-
-<p style='font-size:15.5px; color:#444; line-height:1.65; margin-top:12px;'>
-A powerful yet simple tool crafted by <b>Eng. IRANZI Prince Jean Claude</b> 
-to help you merge and manage GeoPackage attributes with clarity and confidence.<br>
-Smart tools for smart engineers.
-</p>
-
-<hr style='margin-top:25px; margin-bottom:25px;'>
+<div class="header-box">
+    <h1>🌍 GeoData Fusion</h1>
+    <h3>Welcome to a smarter way to harmonize your GeoPackage data.</h3>
+    <p>
+        A powerful yet simple tool crafted by <b>Eng. IRANZI Prince Jean Claude</b> 
+        to help you merge and manage GeoPackage attributes with clarity and confidence.<br>
+        <em>Smart tools for smart engineers.</em>
+    </p>
+</div>
 """,
     unsafe_allow_html=True,
 )
@@ -278,8 +403,8 @@ st.title("Substations and Power Plants GIS Modelling")
 reference_workbooks = get_reference_workbooks()
 
 with st.container():
-    st.markdown('<div class="app-card">', unsafe_allow_html=True)
-    st.markdown("### 📁 Single File Upload")
+    st.markdown('<div class="section-box">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Single File Upload</div>', unsafe_allow_html=True)
     st.markdown(
         "<p class='section-subtext'>Upload your GeoPackage and select how attribute data should be provided.</p>",
         unsafe_allow_html=True,
@@ -382,8 +507,8 @@ with st.container():
     st.markdown('</div>', unsafe_allow_html=True)
 
 with st.container():
-    st.markdown('<div class="app-card">', unsafe_allow_html=True)
-    st.markdown("### 📝 Output Filename")
+    st.markdown('<div class="section-box alt">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Output Filename</div>', unsafe_allow_html=True)
     st.markdown(
         "<p class='section-subtext'>Customize how the updated GeoPackage will be saved. The same name is used for the output layer.</p>",
         unsafe_allow_html=True,
@@ -585,7 +710,7 @@ if gpkg_file and data_ready:
             f"Reference workbook loaded ✔ ({workbook_label} • sheet: {reference_sheet})"
         )
 
-    st.write("### Select join fields")
+    st.markdown('<div class="section-title">Select join fields</div>', unsafe_allow_html=True)
     left_key = st.selectbox("Field in GeoPackage", gdf.columns)
     right_key = st.selectbox("Field in Data File", df.columns)
 
@@ -631,13 +756,13 @@ if gpkg_file and data_ready:
 
 # ---- ZIP bundle workflow ----------------------------------------------------
 with st.container():
-    st.markdown('<div class="app-card">', unsafe_allow_html=True)
-    st.markdown("### 🗂️ Batch ZIP Processing")
+    st.markdown('<div class="section-box tertiary">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Batch ZIP Processing</div>', unsafe_allow_html=True)
     st.markdown(
         "<p class='section-subtext'>Process multiple GeoPackage + spreadsheet pairs by uploading ZIP archives that contain matching filenames.</p>",
         unsafe_allow_html=True,
     )
-    st.write(
+    st.markdown(
         "Upload one or more ZIP archives. Each ZIP should contain a GeoPackage and a matching "
         "CSV/Excel file that share the same base name (e.g., `roads.gpkg` + `roads.xlsx`)."
     )
