@@ -1,0 +1,5 @@
+# Ignore locally stored reference workbooks
+reference_data/**/*.xlsx
+reference_data/**/*.xlsm
+# Allow template/README files to be tracked
+

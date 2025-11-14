@@ -1,10 +1,128 @@
 import os
 import tempfile
 import zipfile
+from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
 import streamlit as st
+from openpyxl import load_workbook
+
+
+REFERENCE_DATA_DIR = Path(__file__).parent / "reference_data"
+SUPPORTED_REFERENCE_EXTENSIONS = (".xlsx", ".xlsm")
+PREVIEW_ROW_COUNT = 20
+MAX_FILTER_VALUES = 200
+
+
+def get_reference_workbooks():
+    """Return mapping of workbook label -> path for bundled Excel files."""
+
+    if not REFERENCE_DATA_DIR.exists():
+        return {}
+
+    workbooks = {}
+    for workbook in sorted(
+        p
+        for p in REFERENCE_DATA_DIR.rglob("*")
+        if p.is_file() and p.suffix.lower() in SUPPORTED_REFERENCE_EXTENSIONS
+    ):
+        label = workbook.relative_to(REFERENCE_DATA_DIR).as_posix()
+        workbooks[label] = workbook
+
+    return workbooks
+
+
+def get_sheet_names(workbook_path: Path):
+    """Return available sheet names for the selected workbook."""
+
+    try:
+        excel_file = pd.ExcelFile(workbook_path)
+        return excel_file.sheet_names
+    except Exception:
+        return []
+
+
+def describe_reference_sheet(workbook_path: Path, sheet_name: str):
+    """Return metadata describing the requested worksheet."""
+
+    wb = None
+    try:
+        wb = load_workbook(workbook_path, read_only=True, data_only=True)
+        worksheet = wb[sheet_name]
+        header_values = next(
+            worksheet.iter_rows(min_row=1, max_row=1, values_only=True),
+            (),
+        )
+        headers = [value for value in header_values if value is not None]
+        # subtract header row from total count if present
+        row_count = max(worksheet.max_row - (1 if headers else 0), 0)
+        column_count = worksheet.max_column
+        return {
+            "rows": row_count,
+            "columns": column_count,
+            "headers": headers,
+        }
+    except Exception:
+        return None
+    finally:
+        if wb is not None:
+            wb.close()
+
+
+def load_reference_preview(workbook_path: Path, sheet_name: str, max_rows: int = PREVIEW_ROW_COUNT):
+    """Return a lightweight preview of the sheet for UI display."""
+
+    try:
+        preview = pd.read_excel(
+            workbook_path,
+            sheet_name=sheet_name,
+            nrows=max_rows,
+        )
+        return preview
+    except Exception:
+        return pd.DataFrame()
+
+
+def list_unique_column_values(
+    workbook_path: Path,
+    sheet_name: str,
+    column_name: str,
+    max_values: int = MAX_FILTER_VALUES,
+):
+    """Return up to `max_values` unique values for the requested column."""
+
+    try:
+        series = pd.read_excel(
+            workbook_path,
+            sheet_name=sheet_name,
+            usecols=[column_name],
+        )[column_name]
+
+        series = series.dropna()
+        unique_values = []
+        for value in pd.unique(series):
+            if isinstance(value, str):
+                normalized = value.strip()
+                if not normalized:
+                    continue
+                unique_values.append(normalized)
+            else:
+                # convert numpy scalar to python native (e.g., int64 -> int)
+                normalized = value.item() if hasattr(value, "item") else value
+                unique_values.append(normalized)
+
+        unique_values = sorted(
+            unique_values,
+            key=lambda val: str(val).lower(),
+        )
+
+        if len(unique_values) > max_values:
+            return unique_values[:max_values]
+
+        return unique_values
+    except Exception:
+        return []
 
 
 st.set_page_config(
@@ -90,15 +208,132 @@ Smart tools for smart engineers.
 st.title("📌 Clean GPKG Attribute Filler – No Duplicate Columns")
 
 # ---- Single file workflow --------------------------------------------------
+reference_workbooks = get_reference_workbooks()
+
 with st.container():
     st.markdown('<div class="app-card">', unsafe_allow_html=True)
     st.markdown("### 📁 Single File Upload")
     st.markdown(
-        "<p class='section-subtext'>Upload your GeoPackage and the corresponding data file to begin the cleaning process.</p>",
+        "<p class='section-subtext'>Upload your GeoPackage and select how attribute data should be provided.</p>",
         unsafe_allow_html=True,
     )
-    gpkg_file = st.file_uploader("Upload GeoPackage (.gpkg)", type=["gpkg"])
-    data_file = st.file_uploader("Upload Data File (CSV or Excel)", type=["csv", "xlsx"])
+    gpkg_file = st.file_uploader("Upload GeoPackage (.gpkg)", type=["gpkg"], key="single_gpkg")
+
+    data_source = st.radio(
+        "Attribute data source",
+        (
+            "Upload CSV/Excel file",
+            "Use stored reference workbook",
+        ),
+        key="data_source_choice",
+    )
+
+    uploaded_data_file = None
+    reference_sheet = None
+    reference_path = None
+    workbook_label = None
+    reference_filter_column = None
+    reference_filter_value = None
+
+    if data_source == "Upload CSV/Excel file":
+        uploaded_data_file = st.file_uploader(
+            "Upload Data File (CSV or Excel)",
+            type=["csv", "xlsx"],
+            key="data_file_uploader",
+        )
+    else:
+        if not reference_workbooks:
+            st.info(
+                "No reference workbooks found under `reference_data/`. Add an Excel file (e.g. `reference_data/power/sample.xlsx`) to use this option."
+            )
+        else:
+            workbook_label = st.selectbox(
+                "Select stored workbook",
+                list(reference_workbooks.keys()),
+                key="reference_workbook_select",
+            )
+            reference_path = reference_workbooks.get(workbook_label)
+            sheet_names = get_sheet_names(reference_path) if reference_path else []
+            if sheet_names:
+                reference_sheet = st.selectbox(
+                    "Select worksheet",
+                    sheet_names,
+                    key="reference_sheet_select",
+                )
+                if reference_path and reference_sheet:
+                    st.caption(
+                        f"Using `reference_data/{workbook_label}` → sheet `{reference_sheet}`"
+                    )
+                    sheet_details = describe_reference_sheet(
+                        reference_path, reference_sheet
+                    )
+                    if sheet_details:
+                        st.info(
+                            f"{sheet_details['rows']} data rows • "
+                            f"{sheet_details['columns']} columns"
+                        )
+                        if sheet_details["headers"]:
+                            st.caption(
+                                "Columns: " + ", ".join(sheet_details["headers"])
+                            )
+
+                    preview_df = load_reference_preview(
+                        reference_path, reference_sheet
+                    )
+                    if not preview_df.empty:
+                        st.write(
+                            f"Previewing the first {min(len(preview_df), PREVIEW_ROW_COUNT)} row(s):"
+                        )
+                        st.dataframe(preview_df)
+
+                        filterable_columns = list(preview_df.columns)
+                        if filterable_columns:
+                            suggested_idx = 0
+                            for idx, column in enumerate(filterable_columns, start=1):
+                                if "substation" in column.lower():
+                                    suggested_idx = idx
+                                    break
+
+                            filter_column_choice = st.selectbox(
+                                "Filter rows by column (optional)",
+                                ["-- All rows --"] + filterable_columns,
+                                index=suggested_idx,
+                                help=(
+                                    "Sheets that contain multiple substations or regions can be filtered before merging. "
+                                    "Leave as '-- All rows --' to keep every row."
+                                ),
+                                key="reference_filter_column_select",
+                            )
+
+                            if filter_column_choice != "-- All rows --":
+                                reference_filter_column = filter_column_choice
+                                distinct_values = list_unique_column_values(
+                                    reference_path,
+                                    reference_sheet,
+                                    reference_filter_column,
+                                )
+                                if distinct_values:
+                                    reference_filter_value = st.selectbox(
+                                        "Choose which value to keep",
+                                        distinct_values,
+                                        key="reference_filter_value_select",
+                                        help="Only rows matching this value will be merged into the GeoPackage.",
+                                    )
+                                    if reference_filter_value is not None:
+                                        st.caption(
+                                            f"Rows where `{reference_filter_column}` = `{reference_filter_value}` will be used."
+                                        )
+                                else:
+                                    st.warning(
+                                        "Unable to list unique values for that column. The full sheet will be used instead."
+                                    )
+                                    reference_filter_column = None
+                    else:
+                        st.warning(
+                            "Unable to preview the selected sheet. Please confirm it contains tabular data."
+                        )
+            else:
+                st.warning("Unable to read sheet names from the selected workbook.")
     st.markdown('</div>', unsafe_allow_html=True)
 
 with st.container():
@@ -197,16 +432,38 @@ def read_pairs_from_zip(uploaded_zip):
     return dataset_pairs
 
 
-if gpkg_file and data_file:
+data_ready = uploaded_data_file is not None or (
+    reference_path is not None and reference_sheet is not None
+)
+
+if gpkg_file and data_ready:
     gdf = gpd.read_file(gpkg_file)
     st.success("GeoPackage Loaded ✔")
 
-    if data_file.name.endswith(".csv"):
-        df = pd.read_csv(data_file)
-    else:
-        df = pd.read_excel(data_file)
-
-    st.success("Data Loaded ✔")
+    if uploaded_data_file is not None:
+        if uploaded_data_file.name.endswith(".csv"):
+            df = pd.read_csv(uploaded_data_file)
+        else:
+            df = pd.read_excel(uploaded_data_file)
+        st.success("Data Loaded ✔")
+    elif reference_path and reference_sheet:
+        df = pd.read_excel(reference_path, sheet_name=reference_sheet)
+        if reference_filter_column and reference_filter_value is not None:
+            filtered_df = df[
+                df[reference_filter_column]
+                .astype(str)
+                .str.strip()
+                .eq(str(reference_filter_value).strip())
+            ]
+            if filtered_df.empty:
+                st.warning(
+                    "No rows match the selected filter value. The full sheet will be used instead."
+                )
+            else:
+                df = filtered_df
+        st.success(
+            f"Reference workbook loaded ✔ ({workbook_label} • sheet: {reference_sheet})"
+        )
 
     st.write("### Select join fields")
     left_key = st.selectbox("Field in GeoPackage", gdf.columns)
