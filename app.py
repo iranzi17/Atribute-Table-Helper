@@ -211,16 +211,19 @@ st.markdown(
         background: #f4f6f9;
     }
     .main {
-        padding: 0 !important;
+        padding: 0 1rem;
     }
     .main > div {
-        max-width: 100% !important;
-        padding: 0 !important;
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 1rem 0;
     }
-    /* Full width for streamlit elements */
-    [data-testid="stMainBlockContainer"] {
-        max-width: 100% !important;
-        padding: 0 !important;
+    /* Allow the hero to break out to full viewport width while keeping the
+       rest of the app centered by using a viewport-width container trick. */
+    .hero-container {
+        width: 100vw;
+        margin-left: calc(50% - 50vw);
+        margin-right: calc(50% - 50vw);
     }
     
     /* Hero Section - Two Column */
@@ -270,7 +273,8 @@ st.markdown(
     /* Hero Right Column - Product Title + Rwanda Map Background */
     .hero-right {
         flex: 0 0 65%;
-        background-image: url("app/reference_data/rwanda_small_map.jpg");
+        /* Try a few common relative paths for the image; the browser will use the first one that exists */
+        background-image: url("./reference_data/rwanda_small_map.jpg"), url("./rwanda_small_map.jpg"), url("rwanda_small_map.jpg");
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
