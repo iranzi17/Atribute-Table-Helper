@@ -388,9 +388,18 @@ st.markdown("""
         font-weight: 500;
     }
     
-    /* Content Wrapper - Padding for sections below hero */
+    /* Content Wrapper - Full width with centered inner content */
     .content-wrapper {
         padding: 2rem;
+        width: 100%;
+        max-width: 100%;
+    }
+    
+    /* Center content sections within the wrapper */
+    .content-wrapper > * {
+        max-width: 980px;
+        margin-left: auto;
+        margin-right: auto;
     }
     
     /* Header Box - Professional landing section */
