@@ -281,6 +281,14 @@ st.markdown("""
         margin: 0 auto;
         padding: 1rem 0;
     }
+    
+    /* Override Streamlit's default max-width to allow full-width hero */
+    main .block-container {
+        max-width: 100% !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+    }
+    
     /* Allow the hero to break out to full viewport width while keeping the
        rest of the app centered by using a viewport-width container trick. */
     .hero-container {
