@@ -86,6 +86,8 @@ ui_hero_left_pct = int(ui_settings.get("hero_left_pct", DEFAULT_HERO_LEFT_PCT))
 # Determine hero right column percentage (defaults to 65%)
 DEFAULT_HERO_RIGHT_PCT = 65
 ui_hero_right_pct = int(ui_settings.get("hero_right_pct", DEFAULT_HERO_RIGHT_PCT))
+# Default fixed-left pixel width (used when locking left column in px)
+DEFAULT_HERO_LEFT_PX = int(ui_settings.get("hero_left_px", 420))
 
 # Ensure session state defaults exist so slider changes will produce live preview
 if "hero_height_slider" not in st.session_state:
@@ -94,6 +96,11 @@ if "hero_left_pct" not in st.session_state:
     st.session_state["hero_left_pct"] = ui_settings.get("hero_left_pct", DEFAULT_HERO_LEFT_PCT)
 if "hero_right_pct" not in st.session_state:
     st.session_state["hero_right_pct"] = ui_settings.get("hero_right_pct", DEFAULT_HERO_RIGHT_PCT)
+if "hero_mode" not in st.session_state:
+    # modes: 'percent' (default) or 'fixed_left'
+    st.session_state["hero_mode"] = ui_settings.get("hero_mode", "percent")
+if "hero_left_px" not in st.session_state:
+    st.session_state["hero_left_px"] = ui_settings.get("hero_left_px", DEFAULT_HERO_LEFT_PX)
 
 
 def _reset_stream(stream):
@@ -244,8 +251,16 @@ st.set_page_config(
 # Use session-state values (if present) so slider changes show live preview
 hero_height_used = int(st.session_state.get("hero_height_slider", ui_hero_height))
 hero_left_pct_used = st.session_state.get("hero_left_pct", ui_hero_left_pct)
-# Use an independently editable right column value if provided, otherwise fall back to 100 - left
 hero_right_pct_used = st.session_state.get("hero_right_pct", ui_hero_right_pct)
+# Determine flex rules depending on mode
+hero_mode_used = st.session_state.get("hero_mode", "percent")
+if hero_mode_used == "fixed_left":
+    # left fixed in px, right fills remaining space
+    left_flex_css = "0 0 " + str(int(st.session_state.get("hero_left_px", DEFAULT_HERO_LEFT_PX))) + "px"
+    right_flex_css = "1 1 auto"
+else:
+    left_flex_css = "0 0 " + str(int(hero_left_pct_used)) + "%"
+    right_flex_css = "0 0 " + str(int(hero_right_pct_used)) + "%"
 
 st.markdown("""
     <style>
@@ -287,7 +302,7 @@ st.markdown("""
     
     /* Hero Left Column - Blue Branding */
     .hero-left {
-        flex: 0 0 """ + str(hero_left_pct_used) + """%;
+        flex: """ + left_flex_css + """;
         background: linear-gradient(135deg, #0d47a1 0%, #1565c0 100%);
         color: #ffffff;
         padding: 3rem 2.5rem;
@@ -320,7 +335,7 @@ st.markdown("""
     
     /* Hero Right Column - Product Title + Rwanda Map Background */
     .hero-right {
-        flex: 0 0 """ + str(hero_right_pct_used) + """%;
+        flex: """ + right_flex_css + """;
         /* Try a few common relative paths for the image; the browser will use the first one that exists */
         background-image: url("./reference_data/rwanda_small_map.jpg"), url("./rwanda_small_map.jpg"), url("rwanda_small_map.jpg");
         background-size: cover;
@@ -588,28 +603,54 @@ with st.expander("UI Settings", expanded=False):
             key="hero_height_slider",
         )
 
-
-        # Allow unbounded numeric input for left/right percentages so user can extend freely
-        hero_left_new = st.number_input(
-            "Hero left column width (%) - enter any integer (no limit)",
-            value=int(st.session_state.get("hero_left_pct", ui_hero_left_pct)),
-            step=1,
-            key="hero_left_pct",
+        # Sizing mode: percent-based or fixed-left (px) where right column expands
+        st.markdown("**Hero sizing mode**")
+        hero_mode_new = st.radio(
+            "Choose how the hero columns size:",
+            ("percent", "fixed_left"),
+            index=0 if st.session_state.get("hero_mode", "percent") == "percent" else 1,
+            key="hero_mode",
         )
 
-        hero_right_new = st.number_input(
-            "Hero right column width (%) - enter any integer (no limit)",
-            value=int(st.session_state.get("hero_right_pct", ui_hero_right_pct)),
-            step=1,
-            key="hero_right_pct",
-        )
+        if st.session_state.get("hero_mode", "percent") == "percent":
+            # Allow unbounded numeric input for left/right percentages so user can extend freely
+            hero_left_new = st.number_input(
+                "Hero left column width (%) - enter any integer (no limit)",
+                value=int(st.session_state.get("hero_left_pct", ui_hero_left_pct)),
+                step=1,
+                key="hero_left_pct",
+            )
+
+            hero_right_new = st.number_input(
+                "Hero right column width (%) - enter any integer (no limit)",
+                value=int(st.session_state.get("hero_right_pct", ui_hero_right_pct)),
+                step=1,
+                key="hero_right_pct",
+            )
+        else:
+            # Fixed-left mode: left column is a fixed pixel width, right column flexes to fill
+            hero_left_px_new = st.number_input(
+                "Hero left column width (px)",
+                value=int(st.session_state.get("hero_left_px", DEFAULT_HERO_LEFT_PX)),
+                step=1,
+                key="hero_left_px",
+            )
 
         st.markdown("*Live preview updates as you change values. Click Save to persist.*")
 
         if st.button("Save UI settings", key="save_ui_settings_btn"):
             ui_settings["hero_height"] = int(st.session_state.get("hero_height_slider", hero_height_new))
-            ui_settings["hero_left_pct"] = int(st.session_state.get("hero_left_pct", hero_left_new))
-            ui_settings["hero_right_pct"] = int(st.session_state.get("hero_right_pct", hero_right_new))
+            ui_settings["hero_mode"] = st.session_state.get("hero_mode", "percent")
+            if ui_settings["hero_mode"] == "percent":
+                ui_settings["hero_left_pct"] = int(st.session_state.get("hero_left_pct", hero_left_new))
+                ui_settings["hero_right_pct"] = int(st.session_state.get("hero_right_pct", hero_right_new))
+                # remove fixed-left px if present
+                ui_settings.pop("hero_left_px", None)
+            else:
+                ui_settings["hero_left_px"] = int(st.session_state.get("hero_left_px", hero_left_px_new))
+                # remove percent keys if present
+                ui_settings.pop("hero_left_pct", None)
+                ui_settings.pop("hero_right_pct", None)
             save_ui_settings(ui_settings)
             st.success("Saved UI settings")
             st.experimental_rerun()
@@ -618,10 +659,14 @@ with st.expander("UI Settings", expanded=False):
             ui_settings.pop("hero_height", None)
             ui_settings.pop("hero_left_pct", None)
             ui_settings.pop("hero_right_pct", None)
+            ui_settings.pop("hero_mode", None)
+            ui_settings.pop("hero_left_px", None)
             save_ui_settings(ui_settings)
             st.session_state["hero_height_slider"] = DEFAULT_HERO_HEIGHT
             st.session_state["hero_left_pct"] = DEFAULT_HERO_LEFT_PCT
             st.session_state["hero_right_pct"] = DEFAULT_HERO_RIGHT_PCT
+            st.session_state["hero_mode"] = "percent"
+            st.session_state["hero_left_px"] = DEFAULT_HERO_LEFT_PX
             st.success("Reset UI settings to defaults")
             st.experimental_rerun()
     except Exception:
