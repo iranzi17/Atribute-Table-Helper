@@ -324,6 +324,24 @@ with st.container():
     reference_path = None
     workbook_label = None
 
+    # Optional: allow pasting tabular data directly from Excel into an editable grid.
+    pasted_df = None
+    with st.expander("Or paste data from Excel / clipboard (optional)"):
+        st.markdown(
+            "Paste tabular data (Ctrl+C from Excel → Ctrl+V here). Pasted data will be used in preference to uploaded files."
+        )
+        try:
+            # Start with an empty DataFrame; `st.data_editor` supports dynamic rows/cols.
+            empty_df_for_editor = pd.DataFrame()
+            edited = st.data_editor(empty_df_for_editor, num_rows="dynamic", key="pasted_data_editor")
+            # If the user pasted something, `edited` will contain data. Consider it present
+            # if it has at least one non-empty cell.
+            if isinstance(edited, pd.DataFrame) and not edited.dropna(how="all").empty:
+                pasted_df = clean_empty_rows(edited)
+                st.success("Pasted data detected — it will be used for merging.")
+        except Exception:
+            pasted_df = None
+
     if data_source == "Upload CSV/Excel file":
         uploaded_data_file = st.file_uploader(
             "Upload Data File (CSV or Excel)",
@@ -537,7 +555,11 @@ if gpkg_file and data_ready:
     gdf = gpd.read_file(gpkg_file)
     st.success("GeoPackage Loaded ✔")
 
-    if uploaded_data_file is not None:
+    # Prefer pasted data if available; otherwise fall back to uploaded file or stored reference
+    if pasted_df is not None:
+        df = pasted_df
+        st.success("Using pasted data ✔")
+    elif uploaded_data_file is not None:
         try:
             df = read_tabular_data(uploaded_data_file)
             df = clean_empty_rows(df)
