@@ -80,6 +80,15 @@ ui_settings = load_ui_settings()
 # Determine hero height (px) from saved UI settings, fall back to 320
 DEFAULT_HERO_HEIGHT = 320
 ui_hero_height = int(ui_settings.get("hero_height", DEFAULT_HERO_HEIGHT))
+# Determine hero left column percentage (defaults to 35%)
+DEFAULT_HERO_LEFT_PCT = 35
+ui_hero_left_pct = int(ui_settings.get("hero_left_pct", DEFAULT_HERO_LEFT_PCT))
+
+# Ensure session state defaults exist so slider changes will produce live preview
+if "hero_height_slider" not in st.session_state:
+    st.session_state["hero_height_slider"] = ui_settings.get("hero_height", DEFAULT_HERO_HEIGHT)
+if "hero_left_pct" not in st.session_state:
+    st.session_state["hero_left_pct"] = ui_settings.get("hero_left_pct", DEFAULT_HERO_LEFT_PCT)
 
 
 def _reset_stream(stream):
@@ -227,6 +236,11 @@ st.set_page_config(
     layout="centered",
 )
 
+# Use session-state values (if present) so slider changes show live preview
+hero_height_used = int(st.session_state.get("hero_height_slider", ui_hero_height))
+hero_left_pct_used = int(st.session_state.get("hero_left_pct", ui_hero_left_pct))
+hero_right_pct_used = max(10, 100 - hero_left_pct_used)
+
 st.markdown("""
     <style>
     * {
@@ -258,7 +272,7 @@ st.markdown("""
     .hero-container {
         display: flex;
         width: 100%;
-        min-height: """ + str(ui_hero_height) + """px;
+        min-height: """ + str(hero_height_used) + """px;
         margin-bottom: 2.5rem;
         box-shadow: 0 8px 20px rgba(13, 71, 161, 0.15);
         border-radius: 8px;
@@ -267,7 +281,7 @@ st.markdown("""
     
     /* Hero Left Column - Blue Branding */
     .hero-left {
-        flex: 0 0 35%;
+        flex: 0 0 """ + str(hero_left_pct_used) + """%;
         background: linear-gradient(135deg, #0d47a1 0%, #1565c0 100%);
         color: #ffffff;
         padding: 3rem 2.5rem;
@@ -300,7 +314,7 @@ st.markdown("""
     
     /* Hero Right Column - Product Title + Rwanda Map Background */
     .hero-right {
-        flex: 0 0 65%;
+        flex: 0 0 """ + str(hero_right_pct_used) + """%;
         /* Try a few common relative paths for the image; the browser will use the first one that exists */
         background-image: url("./reference_data/rwanda_small_map.jpg"), url("./rwanda_small_map.jpg"), url("rwanda_small_map.jpg");
         background-size: cover;
@@ -560,12 +574,39 @@ st.markdown(
 with st.expander("UI Settings", expanded=False):
     try:
         hero_height_new = st.slider(
-            "Hero height (px)", min_value=200, max_value=800, value=ui_hero_height, step=10, key="hero_height_slider"
+            "Hero height (px)",
+            min_value=200,
+            max_value=800,
+            value=st.session_state.get("hero_height_slider", ui_hero_height),
+            step=10,
+            key="hero_height_slider",
         )
+
+        hero_left_new = st.slider(
+            "Hero left column width (%)",
+            min_value=20,
+            max_value=60,
+            value=st.session_state.get("hero_left_pct", ui_hero_left_pct),
+            step=1,
+            key="hero_left_pct",
+        )
+
+        st.markdown("*Live preview updates as you move sliders. Click Save to persist.*")
+
         if st.button("Save UI settings", key="save_ui_settings_btn"):
-            ui_settings["hero_height"] = int(hero_height_new)
+            ui_settings["hero_height"] = int(st.session_state.get("hero_height_slider", hero_height_new))
+            ui_settings["hero_left_pct"] = int(st.session_state.get("hero_left_pct", hero_left_new))
             save_ui_settings(ui_settings)
             st.success("Saved UI settings")
+            st.experimental_rerun()
+        if st.button("Reset to defaults", key="reset_ui_settings_btn"):
+            # Remove saved values and reset session sliders to defaults
+            ui_settings.pop("hero_height", None)
+            ui_settings.pop("hero_left_pct", None)
+            save_ui_settings(ui_settings)
+            st.session_state["hero_height_slider"] = DEFAULT_HERO_HEIGHT
+            st.session_state["hero_left_pct"] = DEFAULT_HERO_LEFT_PCT
+            st.success("Reset UI settings to defaults")
             st.experimental_rerun()
     except Exception:
         # UI should not crash the app; silently ignore
