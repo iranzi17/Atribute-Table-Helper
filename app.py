@@ -71,7 +71,21 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("📌 Clean GPKG Attribute Filler – No Duplicate Columns")
+st.markdown(
+    """
+<h1 style='font-weight:700; font-size:34px; margin-bottom:-5px;'>🌍 GeoData Fusion</h1>
+<h3 style='color:#555; font-weight:500; margin-top:5px;'>Welcome to a smarter way to harmonize your GeoPackage data.</h3>
+
+<p style='font-size:15.5px; color:#444; line-height:1.65; margin-top:12px;'>
+A powerful yet simple tool crafted by <b>Eng. IRANZI Prince Jean Claude</b> 
+to help you merge and manage GeoPackage attributes with clarity and confidence.<br>
+Smart tools for smart engineers.
+</p>
+
+<hr style='margin-top:25px; margin-bottom:25px;'>
+""",
+    unsafe_allow_html=True,
+)
 
 # ---- Single file workflow --------------------------------------------------
 with st.container():
