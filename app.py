@@ -274,7 +274,7 @@ Smart tools for smart engineers.
     unsafe_allow_html=True,
 )
 
-st.title("📌 Clean GPKG Attribute Filler – No Duplicate Columns")
+st.title("Substations and Power Plants GIS Modelling")
 
 # ---- Single file workflow --------------------------------------------------
 reference_workbooks = get_reference_workbooks()
