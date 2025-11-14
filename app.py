@@ -310,6 +310,49 @@ with st.container():
 layer_name = output_name.replace(" ", "_")
 
 
+def sanitize_gdf_for_gpkg(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """
+    Prepare a GeoDataFrame for writing to GeoPackage by:
+    - Converting unsupported types (object, datetime64 with tz) to string.
+    - Removing columns with all NA/NaN values.
+    - Truncating column names to 254 characters (GPKG limit).
+    """
+    gdf_copy = gdf.copy()
+    cols_to_drop = []
+
+    for col in gdf_copy.columns:
+        if col == gdf_copy.geometry.name:
+            continue
+
+        # Drop entirely empty columns to avoid GPKG write errors
+        if gdf_copy[col].isna().all():
+            cols_to_drop.append(col)
+            continue
+
+        col_dtype = gdf_copy[col].dtype
+        # Convert object dtype to string (safer for GPKG)
+        if col_dtype == "object":
+            try:
+                gdf_copy[col] = gdf_copy[col].astype(str)
+            except Exception:
+                pass
+        # Convert datetime with timezone to naive datetime or string
+        elif "datetime64" in str(col_dtype) and hasattr(gdf_copy[col].dtype, "tz"):
+            try:
+                gdf_copy[col] = gdf_copy[col].dt.tz_localize(None)
+            except Exception:
+                gdf_copy[col] = gdf_copy[col].astype(str)
+
+    # Remove empty columns
+    if cols_to_drop:
+        gdf_copy.drop(columns=cols_to_drop, inplace=True)
+
+    # Truncate column names to 254 chars (GPKG limit)
+    gdf_copy.columns = [col[:254] for col in gdf_copy.columns]
+
+    return gdf_copy
+
+
 def merge_without_duplicates(
     gdf: gpd.GeoDataFrame,
     df: pd.DataFrame,
@@ -340,7 +383,27 @@ def merge_without_duplicates(
     if right_key in merged.columns and right_key != left_key:
         merged.drop(columns=[right_key], inplace=True)
 
-    return gpd.GeoDataFrame(merged, geometry=gdf.geometry.name, crs=gdf.crs)
+    # Ensure any incoming-only columns are present in the merged result.
+    # Some join edge-cases (different dtypes, duplicate names, or unexpected suffixing)
+    # can cause an incoming column to be missing. As a safe fallback, map values
+    # from `df` by the right_key onto the merged frame using left_key.
+    for col in incoming_cols:
+        if col not in merged.columns:
+            try:
+                # Build mapping from right_key -> value for this column
+                mapping = df.set_index(right_key)[col].to_dict()
+                merged[col] = merged[left_key].map(mapping)
+                # Cast to the same dtype as the source column when possible
+                try:
+                    merged[col] = merged[col].astype(df[col].dtype)
+                except Exception:
+                    pass
+            except Exception:
+                # If mapping fails for any reason, create an empty column
+                merged[col] = pd.NA
+
+    result = gpd.GeoDataFrame(merged, geometry=gdf.geometry.name, crs=gdf.crs)
+    return sanitize_gdf_for_gpkg(result)
 
 
 def read_pairs_from_zip(uploaded_zip):
@@ -424,7 +487,9 @@ if gpkg_file and data_ready:
                 temp_path = tmp.name
 
             try:
-                merged_gdf.to_file(temp_path, driver="GPKG", layer=layer_name)
+                # Sanitize one more time before writing to handle any edge cases
+                safe_gdf = sanitize_gdf_for_gpkg(merged_gdf)
+                safe_gdf.to_file(temp_path, driver="GPKG", layer=layer_name)
                 with open(temp_path, "rb") as updated:
                     data_bytes = updated.read()
 
@@ -528,7 +593,9 @@ with st.container():
                         temp_path = tmp.name
 
                     try:
-                        merged_gdf.to_file(temp_path, driver="GPKG", layer=layer_name)
+                        # Sanitize one more time before writing to handle any edge cases
+                        safe_gdf = sanitize_gdf_for_gpkg(merged_gdf)
+                        safe_gdf.to_file(temp_path, driver="GPKG", layer=layer_name)
                         with open(temp_path, "rb") as updated:
                             data_bytes = updated.read()
 
