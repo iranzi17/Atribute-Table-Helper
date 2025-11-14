@@ -212,6 +212,85 @@ st.markdown(
     }
     .main > div {
         max-width: 100%;
+        padding: 0;
+    }
+    
+    /* Hero Section - Two Column */
+    .hero-container {
+        display: flex;
+        width: 100%;
+        min-height: 320px;
+        margin-bottom: 2.5rem;
+        box-shadow: 0 8px 20px rgba(13, 71, 161, 0.15);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    
+    /* Hero Left Column - Blue Branding */
+    .hero-left {
+        flex: 0 0 35%;
+        background: linear-gradient(135deg, #0d47a1 0%, #1565c0 100%);
+        color: #ffffff;
+        padding: 3rem 2.5rem;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: flex-start;
+    }
+    .hero-left h2 {
+        font-size: 2.2rem;
+        font-weight: 700;
+        margin-bottom: 1.5rem;
+        letter-spacing: -0.8px;
+    }
+    .hero-left .tagline {
+        font-size: 1rem;
+        font-weight: 500;
+        color: #bbdefb;
+        margin-bottom: 1rem;
+        line-height: 1.5;
+    }
+    .hero-left .byline {
+        font-size: 0.9rem;
+        color: #90caf9;
+        font-style: italic;
+        margin-top: 2rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    
+    /* Hero Right Column - Product Title + Rwanda Map Background */
+    .hero-right {
+        flex: 0 0 65%;
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.98) 100%),
+                    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 500'%3E%3Cpath d='M300 200 Q400 150 500 200 T700 200 L700 300 Q600 350 500 300 T300 300 Z' fill='%230d47a1' opacity='0.05'/%3E%3Ccircle cx='350' cy='250' r='80' fill='%231565c0' opacity='0.03'/%3E%3Ccircle cx='600' cy='280' r='60' fill='%232196f3' opacity='0.04'/%3E%3C/svg%3E");
+        background-size: cover;
+        background-position: center;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding: 3rem 2.5rem;
+        text-align: center;
+    }
+    .hero-right h1 {
+        font-size: 2.4rem;
+        font-weight: 700;
+        color: #0d47a1;
+        line-height: 1.3;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        margin: 0;
+        letter-spacing: -0.5px;
+    }
+    .hero-right .subtitle {
+        font-size: 1rem;
+        color: #1565c0;
+        margin-top: 1rem;
+        font-weight: 500;
+    }
+    
+    /* Content Wrapper - Padding for sections below hero */
+    .content-wrapper {
         padding: 2rem;
     }
     
@@ -367,13 +446,27 @@ st.markdown(
     
     /* Responsive adjustments */
     @media (max-width: 768px) {
+        .hero-container {
+            flex-direction: column;
+            min-height: auto;
+        }
+        .hero-left,
+        .hero-right {
+            flex: 0 0 100%;
+        }
+        .hero-left h2 {
+            font-size: 1.8rem;
+        }
+        .hero-right h1 {
+            font-size: 1.8rem;
+        }
         .header-box h1 {
             font-size: 2rem;
         }
         .section-box {
             padding: 1.5rem;
         }
-        .main > div {
+        .content-wrapper {
             padding: 1rem;
         }
     }
@@ -384,20 +477,28 @@ st.markdown(
 
 st.markdown(
     """
-<div class="header-box">
-    <h1>🌍 GeoData Fusion</h1>
-    <h3>Welcome to a smarter way to harmonize your GeoPackage data.</h3>
-    <p>
-        A powerful yet simple tool crafted by <b>Eng. IRANZI Prince Jean Claude</b> 
-        to help you merge and manage GeoPackage attributes with clarity and confidence.<br>
-        <em>Smart tools for smart engineers.</em>
-    </p>
+<div class="hero-container">
+    <div class="hero-left">
+        <h2>🌍 GeoData Fusion</h2>
+        <div class="tagline">
+            <strong>Smart Attribute Mapping</strong><br>
+            Harmonize GeoPackage data with precision
+        </div>
+        <div class="byline">
+            Built by Eng. IRANZI Prince Jean Claude<br>
+            For engineers, by engineers.
+        </div>
+    </div>
+    <div class="hero-right">
+        <h1>Substations and Power Plants GIS Modelling</h1>
+        <div class="subtitle">Professional geospatial data management for Rwanda's infrastructure</div>
+    </div>
 </div>
+
+<div class="content-wrapper">
 """,
     unsafe_allow_html=True,
 )
-
-st.title("Substations and Power Plants GIS Modelling")
 
 # ---- Single file workflow --------------------------------------------------
 reference_workbooks = get_reference_workbooks()
@@ -877,6 +978,10 @@ with st.container():
     st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown(
-    "<div class='custom-footer'>Developed by Eng. IRANZI Prince Jean Claude</div>",
+    """
+</div>
+
+<div class='custom-footer'>Developed by Eng. IRANZI Prince Jean Claude</div>
+""",
     unsafe_allow_html=True,
 )
