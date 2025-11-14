@@ -7,11 +7,49 @@ import geopandas as gpd
 import pandas as pd
 import streamlit as st
 from openpyxl import load_workbook
+import json
 
 
 REFERENCE_DATA_DIR = Path(__file__).parent / "reference_data"
 SUPPORTED_REFERENCE_EXTENSIONS = (".xlsx", ".xlsm")
 PREVIEW_ROW_COUNT = 20
+
+# Persistent name-memory file (maps equipment_type -> user-chosen filename)
+NAME_MEMORY_PATH = Path(__file__).parent / "name_memory.json"
+
+
+def load_name_memory() -> dict:
+    """Load the name memory JSON file if present, otherwise return empty dict."""
+    try:
+        if NAME_MEMORY_PATH.exists():
+            with open(NAME_MEMORY_PATH, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+    except Exception:
+        # Corrupt or unreadable file — ignore and start fresh
+        return {}
+    return {}
+
+
+def save_name_memory(mapping: dict):
+    """Persist the mapping to disk (best-effort)."""
+    try:
+        with open(NAME_MEMORY_PATH, "w", encoding="utf-8") as fh:
+            json.dump(mapping, fh, ensure_ascii=False, indent=2)
+    except Exception:
+        # Silently ignore failures to avoid disrupting the app UX
+        pass
+
+
+def set_saved_name(equipment_type: str, name: str, memory: dict):
+    """Save a single mapping (in-memory and persist to disk)."""
+    if not equipment_type or not name:
+        return
+    memory[equipment_type] = name
+    save_name_memory(memory)
+
+
+# Load memory on startup
+name_memory = load_name_memory()
 
 
 def _reset_stream(stream):
@@ -300,11 +338,27 @@ with st.container():
         "<p class='section-subtext'>Customize how the updated GeoPackage will be saved. The same name is used for the output layer.</p>",
         unsafe_allow_html=True,
     )
+    # Detect equipment type for name-memory suggestions
+    equipment_type = None
+    if workbook_label:
+        equipment_type = workbook_label
+    elif uploaded_data_file is not None:
+        try:
+            equipment_type = Path(uploaded_data_file.name).stem
+        except Exception:
+            equipment_type = None
+
+    # Auto-generated default name for this single-file workflow
+    auto_name = "updated_clean"
+
+    # Suggested name: either previously saved name for this equipment_type or the auto-generated name
+    suggested_name = name_memory.get(equipment_type, auto_name) if equipment_type else auto_name
+
     output_name = st.text_input(
         "Name for the updated GeoPackage (without extension)",
-        value="updated_clean",
+        value=suggested_name,
         help="This will also be used for the GeoPackage layer name.",
-    ).strip() or "updated_clean"
+    ).strip() or auto_name
     st.markdown('</div>', unsafe_allow_html=True)
 
 layer_name = output_name.replace(" ", "_")
@@ -489,6 +543,17 @@ if gpkg_file and data_ready:
             try:
                 # Sanitize one more time before writing to handle any edge cases
                 safe_gdf = sanitize_gdf_for_gpkg(merged_gdf)
+                # If an equipment_type was detected and the user typed a custom name,
+                # persist it so future sessions reuse the name.
+                try:
+                    if equipment_type:
+                        existing = name_memory.get(equipment_type)
+                        # If output_name differs from saved mapping and differs from auto_name, save it
+                        if output_name and output_name != existing and output_name != auto_name:
+                            set_saved_name(equipment_type, output_name, name_memory)
+                except Exception:
+                    pass
+
                 safe_gdf.to_file(temp_path, driver="GPKG", layer=layer_name)
                 with open(temp_path, "rb") as updated:
                     data_bytes = updated.read()
@@ -562,9 +627,13 @@ with st.container():
                     dataset["df"].columns,
                     key=f"right_key_{idx}",
                 )
+                # Suggest previously saved name for this equipment (dataset base) if available
+                ds_equipment_type = dataset["base"]
+                ds_auto = f"{dataset['base']}_updated"
+                ds_suggested = name_memory.get(ds_equipment_type, ds_auto)
                 st.text_input(
                     "Output file name (without extension)",
-                    value=f"{dataset['base']}_updated",
+                    value=ds_suggested,
                     key=f"output_name_{idx}",
                 )
 
@@ -595,6 +664,16 @@ with st.container():
                     try:
                         # Sanitize one more time before writing to handle any edge cases
                         safe_gdf = sanitize_gdf_for_gpkg(merged_gdf)
+                        # Persist custom output name for this dataset's equipment type if changed
+                        try:
+                            ds_equipment_type = dataset["base"]
+                            existing = name_memory.get(ds_equipment_type)
+                            ds_auto = f"{dataset['base']}_updated"
+                            if output_name and output_name != existing and output_name != ds_auto:
+                                set_saved_name(ds_equipment_type, output_name, name_memory)
+                        except Exception:
+                            pass
+
                         safe_gdf.to_file(temp_path, driver="GPKG", layer=layer_name)
                         with open(temp_path, "rb") as updated:
                             data_bytes = updated.read()
