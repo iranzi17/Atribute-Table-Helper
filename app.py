@@ -245,7 +245,7 @@ def load_reference_preview(workbook_path: Path, sheet_name: str, max_rows: int =
 st.set_page_config(
     page_title="Clean GPKG Attribute Filler",
     page_icon="🗂️",
-    layout="centered",
+    layout="wide",
 )
 
 # Use session-state values (if present) so slider changes show live preview
@@ -274,37 +274,38 @@ st.markdown("""
         background: #f4f6f9;
     }
     .main {
-        padding: 0 1rem;
+        padding: 0 !important;
     }
     .main > div {
-        max-width: 980px;
-        margin: 0 auto;
-        padding: 1rem 0;
-    }
-    
-    /* Override Streamlit's default max-width to allow full-width hero */
-    main .block-container {
+        width: 100% !important;
         max-width: 100% !important;
-        padding-left: 0 !important;
-        padding-right: 0 !important;
+        padding: 0 !important;
+        margin: 0 !important;
     }
     
-    /* Allow the hero to break out to full viewport width while keeping the
-       rest of the app centered by using a viewport-width container trick. */
-    .hero-container {
-        width: 100vw;
-        margin-left: calc(50% - 50vw);
-        margin-right: calc(50% - 50vw);
+    /* Aggressively override all Streamlit width constraints */
+    main .block-container {
+        width: 100% !important;
+        max-width: 100% !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    section[data-testid="stSidebar"] + div {
+        width: 100% !important;
+        max-width: 100% !important;
     }
     
-    /* Hero Section - Two Column */
+    /* Hero Section - Full Width */
     .hero-container {
         display: flex;
         width: 100%;
+        max-width: 100% !important;
         min-height: """ + str(hero_height_used) + """px;
+        margin: 0 !important;
+        padding: 0 !important;
         margin-bottom: 2.5rem;
         box-shadow: 0 8px 20px rgba(13, 71, 161, 0.15);
-        border-radius: 8px;
+        border-radius: 0 !important;
         overflow: hidden;
     }
     
@@ -388,15 +389,19 @@ st.markdown("""
         font-weight: 500;
     }
     
-    /* Content Wrapper - Full width with centered inner content */
+    /* Content Wrapper - Full width, center child elements */
     .content-wrapper {
-        padding: 2rem;
-        width: 100%;
-        max-width: 100%;
+        width: 100% !important;
+        max-width: 100% !important;
+        padding: 2rem !important;
+        margin: 0 !important;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
     }
     
-    /* Center content sections within the wrapper */
     .content-wrapper > * {
+        width: 100%;
         max-width: 980px;
         margin-left: auto;
         margin-right: auto;
