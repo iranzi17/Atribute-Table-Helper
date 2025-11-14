@@ -6,6 +6,81 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 import streamlit as st
+from openpyxl import load_workbook
+
+
+REFERENCE_DATA_DIR = Path(__file__).parent / "reference_data"
+SUPPORTED_REFERENCE_EXTENSIONS = (".xlsx", ".xlsm")
+PREVIEW_ROW_COUNT = 20
+
+
+def get_reference_workbooks():
+    """Return mapping of workbook label -> path for bundled Excel files."""
+
+    if not REFERENCE_DATA_DIR.exists():
+        return {}
+
+    workbooks = {}
+    for workbook in sorted(
+        p
+        for p in REFERENCE_DATA_DIR.rglob("*")
+        if p.is_file() and p.suffix.lower() in SUPPORTED_REFERENCE_EXTENSIONS
+    ):
+        label = workbook.relative_to(REFERENCE_DATA_DIR).as_posix()
+        workbooks[label] = workbook
+
+    return workbooks
+
+
+def get_sheet_names(workbook_path: Path):
+    """Return available sheet names for the selected workbook."""
+
+    try:
+        excel_file = pd.ExcelFile(workbook_path)
+        return excel_file.sheet_names
+    except Exception:
+        return []
+
+
+def describe_reference_sheet(workbook_path: Path, sheet_name: str):
+    """Return metadata describing the requested worksheet."""
+
+    wb = None
+    try:
+        wb = load_workbook(workbook_path, read_only=True, data_only=True)
+        worksheet = wb[sheet_name]
+        header_values = next(
+            worksheet.iter_rows(min_row=1, max_row=1, values_only=True),
+            (),
+        )
+        headers = [value for value in header_values if value is not None]
+        # subtract header row from total count if present
+        row_count = max(worksheet.max_row - (1 if headers else 0), 0)
+        column_count = worksheet.max_column
+        return {
+            "rows": row_count,
+            "columns": column_count,
+            "headers": headers,
+        }
+    except Exception:
+        return None
+    finally:
+        if wb is not None:
+            wb.close()
+
+
+def load_reference_preview(workbook_path: Path, sheet_name: str, max_rows: int = PREVIEW_ROW_COUNT):
+    """Return a lightweight preview of the sheet for UI display."""
+
+    try:
+        preview = pd.read_excel(
+            workbook_path,
+            sheet_name=sheet_name,
+            nrows=max_rows,
+        )
+        return preview
+    except Exception:
+        return pd.DataFrame()
 
 
 REFERENCE_DATA_DIR = Path(__file__).parent / "reference_data"
