@@ -291,6 +291,7 @@ with st.container():
         (
             "Upload CSV/Excel file",
             "Use stored reference workbook",
+            "Paste data directly",
         ),
         key="data_source_choice",
     )
@@ -299,57 +300,57 @@ with st.container():
     reference_sheet = None
     reference_path = None
     workbook_label = None
-
-    # Optional: allow pasting raw tabular text (Ctrl+C from Excel → Ctrl+V here).
-    # The pasted text is parsed (TSV/CSV autodetect), shown in a sheet-like
-    # `st.data_editor` for editing, cleaned, and then used in preference to uploaded files.
     pasted_df = None
-    with st.expander("Or paste raw tabular text (optional)"):
-        st.markdown(
-            "Paste raw tabular data (Ctrl+C from Excel → Ctrl+V here). The app will parse TSV/CSV, show it for editing, and use it for merging."
-        )
-        paste_text = st.text_area(
-            "Paste your data here (TSV/CSV format)",
-            height=150,
-            placeholder="Paste tabular data here...",
-        )
 
-        if isinstance(paste_text, str) and paste_text.strip():
-            parsed = None
-            # Try autodetecting separator first
-            try:
-                parsed = pd.read_csv(StringIO(paste_text), sep=None, engine="python")
-            except Exception:
-                # Fallbacks: try tab, then comma
+    # Show paste editor only when "Paste data directly" is selected
+    if data_source == "Paste data directly":
+        with st.container():
+            st.markdown("##### Paste Your Tabular Data")
+            st.markdown(
+                "Paste raw tabular data (Ctrl+C from Excel → Ctrl+V here). The app will parse TSV/CSV, show it for editing, and use it for merging."
+            )
+            paste_text = st.text_area(
+                "Paste your data here (TSV/CSV format)",
+                height=150,
+                placeholder="Paste tabular data here...",
+                key="paste_text_direct",
+            )
+
+            if isinstance(paste_text, str) and paste_text.strip():
+                parsed = None
+                # Try autodetecting separator first
                 try:
-                    parsed = pd.read_csv(StringIO(paste_text), sep="\t")
+                    parsed = pd.read_csv(StringIO(paste_text), sep=None, engine="python")
                 except Exception:
+                    # Fallbacks: try tab, then comma
                     try:
-                        parsed = pd.read_csv(StringIO(paste_text), sep=",")
+                        parsed = pd.read_csv(StringIO(paste_text), sep="\t")
                     except Exception:
-                        parsed = None
+                        try:
+                            parsed = pd.read_csv(StringIO(paste_text), sep=",")
+                        except Exception:
+                            parsed = None
 
-            if isinstance(parsed, pd.DataFrame):
-                # Show parsed DataFrame in an editable grid so users can tweak before merging
-                edited = st.data_editor(parsed, num_rows="dynamic", key="pasted_data_editor")
-                if isinstance(edited, pd.DataFrame) and not edited.dropna(how="all").empty:
-                    pasted_df = clean_empty_rows(edited)
-                    # Persist pasted DataFrame into session_state so it survives reruns
+                if isinstance(parsed, pd.DataFrame):
+                    # Show parsed DataFrame in an editable grid so users can tweak before merging
+                    edited = st.data_editor(parsed, num_rows="dynamic", key="pasted_data_editor_direct")
+                    if isinstance(edited, pd.DataFrame) and not edited.dropna(how="all").empty:
+                        pasted_df = clean_empty_rows(edited)
+                        # Persist pasted DataFrame into session_state so it survives reruns
+                        try:
+                            st.session_state["df_from_paste"] = pasted_df
+                        except Exception:
+                            pass
+                        st.success("Pasted data detected — it will be used for merging.")
+                else:
+                    st.warning("Unable to parse pasted text as a table. Please ensure it's tabular (TSV/CSV) or paste directly from Excel cells.")
+            # If the text area is empty, remove any previously saved pasted DF from session state
+            if not paste_text or not str(paste_text).strip():
+                if "df_from_paste" in st.session_state:
                     try:
-                        st.session_state["df_from_paste"] = pasted_df
+                        del st.session_state["df_from_paste"]
                     except Exception:
-                        # best-effort; continue without persistence on failure
                         pass
-                    st.success("Pasted data detected — it will be used for merging.")
-            else:
-                st.warning("Unable to parse pasted text as a table. Please ensure it's tabular (TSV/CSV) or paste directly from Excel cells.")
-        # If the text area is empty, remove any previously saved pasted DF from session state
-        if not paste_text or not str(paste_text).strip():
-            if "df_from_paste" in st.session_state:
-                try:
-                    del st.session_state["df_from_paste"]
-                except Exception:
-                    pass
 
     if data_source == "Upload CSV/Excel file":
         uploaded_data_file = st.file_uploader(
