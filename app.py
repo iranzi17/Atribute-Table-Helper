@@ -83,6 +83,31 @@ def load_reference_preview(workbook_path: Path, sheet_name: str, max_rows: int =
         return pd.DataFrame()
 
 
+REFERENCE_DATA_DIR = Path(__file__).parent / "reference_data"
+
+
+def get_reference_workbooks():
+    """Return mapping of workbook label -> path for bundled Excel files."""
+
+    if not REFERENCE_DATA_DIR.exists():
+        return {}
+
+    workbooks = {}
+    for workbook in sorted(REFERENCE_DATA_DIR.glob("*.xlsx")):
+        workbooks[workbook.name] = workbook
+    return workbooks
+
+
+def get_sheet_names(workbook_path: Path):
+    """Return available sheet names for the selected workbook."""
+
+    try:
+        excel_file = pd.ExcelFile(workbook_path)
+        return excel_file.sheet_names
+    except Exception:
+        return []
+
+
 st.set_page_config(
     page_title="Clean GPKG Attribute Filler",
     page_icon="🗂️",
@@ -200,7 +225,7 @@ with st.container():
     else:
         if not reference_workbooks:
             st.info(
-                "No reference workbooks found under `reference_data/`. Add an Excel file (e.g. `reference_data/power/sample.xlsx`) to use this option."
+                "No reference workbooks found in `reference_data`. Add an Excel file to that folder to use this option."
             )
         else:
             workbook_label = st.selectbox(
@@ -216,35 +241,6 @@ with st.container():
                     sheet_names,
                     key="reference_sheet_select",
                 )
-                if reference_path and reference_sheet:
-                    st.caption(
-                        f"Using `reference_data/{workbook_label}` → sheet `{reference_sheet}`"
-                    )
-                    sheet_details = describe_reference_sheet(
-                        reference_path, reference_sheet
-                    )
-                    if sheet_details:
-                        st.info(
-                            f"{sheet_details['rows']} data rows • "
-                            f"{sheet_details['columns']} columns"
-                        )
-                        if sheet_details["headers"]:
-                            st.caption(
-                                "Columns: " + ", ".join(sheet_details["headers"])
-                            )
-
-                    preview_df = load_reference_preview(
-                        reference_path, reference_sheet
-                    )
-                    if not preview_df.empty:
-                        st.write(
-                            f"Previewing the first {min(len(preview_df), PREVIEW_ROW_COUNT)} row(s):"
-                        )
-                        st.dataframe(preview_df)
-                    else:
-                        st.warning(
-                            "Unable to preview the selected sheet. Please confirm it contains tabular data."
-                        )
             else:
                 st.warning("Unable to read sheet names from the selected workbook.")
     st.markdown('</div>', unsafe_allow_html=True)

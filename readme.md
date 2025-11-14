@@ -20,10 +20,9 @@ streamlit run app.py
 
 ## Using built-in reference Excel workbooks
 
-1. Place your curated Excel file(s) anywhere inside the `reference_data/` folder tree (e.g., `reference_data/power/substations.xlsx`).
-2. Restart the Streamlit app so it can detect the new workbook. The UI lists the relative path so it is easy to distinguish multiple datasets.
-3. In the **Single File Upload** section choose **Use stored reference workbook**, pick the workbook + sheet, review the automatic schema preview, and continue the merge as usual.
-4. The UI currently supports `.xlsx` and `.xlsm` files and ignores them via `.gitignore`, so you can safely keep private workbooks locally without accidentally committing them.
+1. Place your curated Excel file(s) inside the `reference_data/` folder.
+2. Restart the Streamlit app so it can detect the new workbook.
+3. In the **Single File Upload** section choose **Use stored reference workbook**, select the workbook + sheet, and continue the merge as usual.
 
 > ⚠️ Only store non-sensitive data inside the repository if it will be shared publicly.
 
