@@ -941,7 +941,7 @@ with st.expander("UI Settings", expanded=False):
                 ui_settings.pop("hero_right_pct", None)
             save_ui_settings(ui_settings)
             st.success("Saved UI settings")
-            st.experimental_rerun()
+            rerun_app()
         if st.button("Reset to defaults", key="reset_ui_settings_btn"):
             # Remove saved values and reset session sliders to defaults
             ui_settings.pop("hero_height", None)
@@ -960,7 +960,7 @@ with st.expander("UI Settings", expanded=False):
             st.session_state["hero_gradient_start"] = DEFAULT_HERO_GRADIENT_START
             st.session_state["hero_gradient_end"] = DEFAULT_HERO_GRADIENT_END
             st.success("Reset UI settings to defaults")
-            st.experimental_rerun()
+            rerun_app()
     except Exception:
         # UI should not crash the app; silently ignore
         pass
