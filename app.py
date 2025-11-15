@@ -2,6 +2,7 @@ import os
 import tempfile
 import zipfile
 from pathlib import Path
+import base64
 
 import geopandas as gpd
 import pandas as pd
@@ -12,6 +13,7 @@ from io import StringIO
 
 
 REFERENCE_DATA_DIR = Path(__file__).parent / "reference_data"
+HERO_IMAGE_PATH = Path(__file__).parent / "rwanda_small_map.jpg"
 SUPPORTED_REFERENCE_EXTENSIONS = (".xlsx", ".xlsm")
 PREVIEW_ROW_COUNT = 20
 
@@ -74,6 +76,16 @@ def save_ui_settings(mapping: dict):
         pass
 
 
+def load_base64_image(image_path: Path) -> str:
+    """Return the base64 representation of an image, or empty string on failure."""
+
+    try:
+        with open(image_path, "rb") as fh:
+            return base64.b64encode(fh.read()).decode("utf-8")
+    except Exception:
+        return ""
+
+
 # load UI settings
 ui_settings = load_ui_settings()
 
@@ -88,6 +100,11 @@ DEFAULT_HERO_RIGHT_PCT = 65
 ui_hero_right_pct = int(ui_settings.get("hero_right_pct", DEFAULT_HERO_RIGHT_PCT))
 # Default fixed-left pixel width (used when locking left column in px)
 DEFAULT_HERO_LEFT_PX = int(ui_settings.get("hero_left_px", 420))
+# Default gradient overlay opacity stops
+DEFAULT_HERO_GRADIENT_START = 0.35
+DEFAULT_HERO_GRADIENT_END = 0.55
+ui_hero_gradient_start = float(ui_settings.get("hero_gradient_start", DEFAULT_HERO_GRADIENT_START))
+ui_hero_gradient_end = float(ui_settings.get("hero_gradient_end", DEFAULT_HERO_GRADIENT_END))
 
 # Ensure session state defaults exist so slider changes will produce live preview
 if "hero_height_slider" not in st.session_state:
@@ -101,6 +118,33 @@ if "hero_mode" not in st.session_state:
     st.session_state["hero_mode"] = ui_settings.get("hero_mode", "percent")
 if "hero_left_px" not in st.session_state:
     st.session_state["hero_left_px"] = ui_settings.get("hero_left_px", DEFAULT_HERO_LEFT_PX)
+if "hero_gradient_start" not in st.session_state:
+    st.session_state["hero_gradient_start"] = ui_settings.get(
+        "hero_gradient_start", ui_hero_gradient_start
+    )
+if "hero_gradient_end" not in st.session_state:
+    st.session_state["hero_gradient_end"] = ui_settings.get(
+        "hero_gradient_end", ui_hero_gradient_end
+    )
+
+# Pre-load hero background image (best-effort)
+hero_bg_data = load_base64_image(HERO_IMAGE_PATH)
+# A subtle translucent gradient overlay keeps text readable without hiding the map
+hero_gradient_start_used = float(
+    min(max(st.session_state.get("hero_gradient_start", ui_hero_gradient_start), 0.0), 1.0)
+)
+hero_gradient_end_used = float(
+    min(max(st.session_state.get("hero_gradient_end", ui_hero_gradient_end), 0.0), 1.0)
+)
+hero_background_layers = [
+    "linear-gradient(135deg, rgba(255, 255, 255, {start:.2f}) 0%, rgba(248, 250, 252, {end:.2f}) 100%)".format(
+        start=hero_gradient_start_used,
+        end=hero_gradient_end_used,
+    )
+]
+if hero_bg_data:
+    hero_background_layers.append(f"url('data:image/jpeg;base64,{hero_bg_data}')")
+hero_background_css = ", ".join(hero_background_layers)
 
 
 def _reset_stream(stream):
@@ -346,9 +390,10 @@ st.markdown("""
     .hero-right {
         flex: """ + right_flex_css + """;
         background: linear-gradient(135deg, #f0f4f8 0%, #e8eef7 100%);
-        background-image: 
-            url("app/reference_data/rwanda_small_map.jpg");
-            linear-gradient(135deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 250, 252, 0.95) 100%);
+        background-image: """ + hero_background_css + """;
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
         display: flex;
         flex-direction: column;
         justify-content: center;
@@ -624,6 +669,24 @@ with st.expander("UI Settings", expanded=False):
             key="hero_height_slider",
         )
 
+        st.markdown("**Hero background gradient overlay**")
+        hero_gradient_start_new = st.slider(
+            "Gradient start opacity (0 = transparent, 1 = solid)",
+            min_value=0.0,
+            max_value=1.0,
+            value=float(st.session_state.get("hero_gradient_start", hero_gradient_start_used)),
+            step=0.05,
+            key="hero_gradient_start",
+        )
+        hero_gradient_end_new = st.slider(
+            "Gradient end opacity (0 = transparent, 1 = solid)",
+            min_value=0.0,
+            max_value=1.0,
+            value=float(st.session_state.get("hero_gradient_end", hero_gradient_end_used)),
+            step=0.05,
+            key="hero_gradient_end",
+        )
+
         # Sizing mode: percent-based or fixed-left (px) where right column expands
         st.markdown("**Hero sizing mode**")
         hero_mode_new = st.radio(
@@ -662,6 +725,12 @@ with st.expander("UI Settings", expanded=False):
         if st.button("Save UI settings", key="save_ui_settings_btn"):
             ui_settings["hero_height"] = int(st.session_state.get("hero_height_slider", hero_height_new))
             ui_settings["hero_mode"] = st.session_state.get("hero_mode", "percent")
+            ui_settings["hero_gradient_start"] = float(
+                st.session_state.get("hero_gradient_start", hero_gradient_start_new)
+            )
+            ui_settings["hero_gradient_end"] = float(
+                st.session_state.get("hero_gradient_end", hero_gradient_end_new)
+            )
             if ui_settings["hero_mode"] == "percent":
                 ui_settings["hero_left_pct"] = int(st.session_state.get("hero_left_pct", hero_left_new))
                 ui_settings["hero_right_pct"] = int(st.session_state.get("hero_right_pct", hero_right_new))
@@ -682,12 +751,16 @@ with st.expander("UI Settings", expanded=False):
             ui_settings.pop("hero_right_pct", None)
             ui_settings.pop("hero_mode", None)
             ui_settings.pop("hero_left_px", None)
+            ui_settings.pop("hero_gradient_start", None)
+            ui_settings.pop("hero_gradient_end", None)
             save_ui_settings(ui_settings)
             st.session_state["hero_height_slider"] = DEFAULT_HERO_HEIGHT
             st.session_state["hero_left_pct"] = DEFAULT_HERO_LEFT_PCT
             st.session_state["hero_right_pct"] = DEFAULT_HERO_RIGHT_PCT
             st.session_state["hero_mode"] = "percent"
             st.session_state["hero_left_px"] = DEFAULT_HERO_LEFT_PX
+            st.session_state["hero_gradient_start"] = DEFAULT_HERO_GRADIENT_START
+            st.session_state["hero_gradient_end"] = DEFAULT_HERO_GRADIENT_END
             st.success("Reset UI settings to defaults")
             st.experimental_rerun()
     except Exception:
