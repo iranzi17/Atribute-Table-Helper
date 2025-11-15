@@ -3,6 +3,10 @@ import tempfile
 import zipfile
 from pathlib import Path
 import base64
+from datetime import datetime, time, timedelta
+import html
+import random
+from zoneinfo import ZoneInfo
 
 import geopandas as gpd
 import pandas as pd
@@ -385,7 +389,7 @@ st.markdown("""
         min-height: """ + str(hero_height_used) + """px;
         margin: 0 !important;
         padding: 0 !important;
-        margin-bottom: 2.5rem;
+        margin-bottom: 0;
         box-shadow: 0 8px 20px rgba(13, 71, 161, 0.15);
         border-radius: 0 !important;
         overflow: hidden;
@@ -689,11 +693,153 @@ st.markdown(
         <div class="subtitle">Professional geospatial data management for Rwanda's infrastructure</div>
     </div>
 </div>
-
-<div class="content-wrapper">
 """,
     unsafe_allow_html=True,
 )
+
+# ---- QOTD system: load → select daily quote → show -----------------------
+QOTD_PATH = Path(__file__).parent / "quotes.json"
+QOTD_REFRESH_TIME = time(6, 0)
+QOTD_TIMEZONE = ZoneInfo("Africa/Kigali")
+DEFAULT_QOTD_QUOTES = [
+    {"text": "Measure twice, map once; precision makes spatial insight powerful.", "author": "Surveyor's Axiom"},
+    {"text": "Every coordinate tells a story waiting for an engineer to interpret it.", "author": "GeoSystems Lead"},
+    {"text": "Accurate data layers are the scaffolding of resilient infrastructure.", "author": "Civil GIS Collective"},
+    {"text": "An engineer armed with GIS can turn raw terrain into informed design.", "author": "Spatial Planning Guild"},
+    {"text": "Maps are the interface between imagination and construction.", "author": "Ada Augusta"},
+    {"text": "When latitude meets logic, breakthroughs follow.", "author": "Control Point Studio"},
+    {"text": "Great grids make great cities.", "author": "Urban Network Initiative"},
+    {"text": "Never trust a map you didn't debug yourself.", "author": "Field Engineer's Rule"},
+    {"text": "Topology errors are whispers that something in the field needs your attention.", "author": "GIS QA Team"},
+    {"text": "Scale models fade, but geospatial models evolve with every dataset.", "author": "Digital Twin Lab"},
+    {"text": "Precision engineering is a love letter to the future.", "author": "Structures Atelier"},
+    {"text": "Terrain is the silent stakeholder in every infrastructure project.", "author": "Hydrology Partners"},
+    {"text": "Buffer your assumptions like you buffer your geometries—generously.", "author": "Spatial Analyst Humor"},
+    {"text": "Innovation happens where satellite imagery meets stubborn curiosity.", "author": "Orbital Cartography Group"},
+    {"text": "The shortest path algorithms teach us: constraints reveal elegance.", "author": "Graph Theory Circle"},
+    {"text": "Coordinate systems are the grammar of geographic storytelling.", "author": "Projection Society"},
+    {"text": "Clean schemas save muddy boots.", "author": "Field Data Core"},
+    {"text": "A resilient grid is engineered twice: once on-site, once on-screen.", "author": "Power Systems Studio"},
+    {"text": "Contours are the fingerprints of the earth.", "author": "Topographic Collective"},
+    {"text": "Metadata is the engineering diary your future self will thank you for.", "author": "Documentation League"},
+    {"text": "In GIS, accuracy is kindness to the crews who follow your plans.", "author": "Pipeline Cartographer"},
+    {"text": "Let data drive decisions, but let engineers drive the data.", "author": "Systems Integration Forum"},
+    {"text": "Spatial joins turn isolated facts into operational knowledge.", "author": "GeoAnalytics Lab"},
+    {"text": "A well-designed attribute table is as vital as a well-cured concrete pour.", "author": "Structural Data Guild"},
+    {"text": "Routing fiber or roads, the map cares not—only the engineer's intent matters.", "author": "Infrastructure Weavers"},
+    {"text": "Use elevation to your advantage; gravity is the oldest project partner.", "author": "Hydraulic Insights"},
+    {"text": "Reliable basemaps are quiet enablers of heroic field days.", "author": "Remote Sensing Crew"},
+    {"text": "Quality control in GIS is the compass that keeps projects true north.", "author": "Survey Integrity Team"},
+    {"text": "Layer transparency teaches us that clarity often lives in overlap.", "author": "Visualization Studio"},
+    {"text": "Engineers who map well build well.", "author": "Site Readiness Council"},
+    {"text": "Voltage without vision is noise; vision with voltage powers nations.", "author": "Grid Architects"},
+    {"text": "A disciplined circuit diagram is a promise of reliable light.", "author": "Powerline Atelier"},
+    {"text": "Great mapping is invisible; people only notice when it is missing.", "author": "Cartography Collective"},
+    {"text": "Survey stakes may move, but truth in data should not.", "author": "Field Integrity Corps"},
+    {"text": "Engineers turn constraints into catalysts for excellence.", "author": "Design Performance Lab"},
+    {"text": "Every raster pixel is a sensor whispering about the earth.", "author": "Imagery Insights"},
+    {"text": "Switchyards reward patience—the neatest diagrams prevent the loudest faults.", "author": "Substation Guild"},
+    {"text": "Model the future as carefully as you document the past.", "author": "Heritage Engineers"},
+    {"text": "A tidy attribute table shortens site visits more than any shortcut road.", "author": "Logistics Cartographers"},
+    {"text": "Precision thrives where curiosity meets calibration.", "author": "Metrology Circle"},
+    {"text": "Triangulate problems from multiple datasets before they triangulate you.", "author": "Spatial Troubleshooters"},
+    {"text": "Sustainable grids start with engineers who listen to the landscape.", "author": "Green Circuit Alliance"},
+    {"text": "A GIS without metadata is a switchboard without labels.", "author": "Operations Whisper"},
+    {"text": "Let excellence be the standard unit in every engineering drawing.", "author": "Drafting Virtuosi"},
+    {"text": "Electrical safety begins with accurate schematics and ends with disciplined crews.", "author": "Protection Relay Team"},
+    {"text": "Contours, cables, and code all obey the same rule: clarity first.", "author": "Interdisciplinary Forum"},
+    {"text": "When you blend spatial science with empathy, communities flourish.", "author": "Human-Centered GIS"},
+    {"text": "Testing assumptions is cheaper than rebuilding substations.", "author": "Reliability Taskforce"},
+    {"text": "Bring excellence to mundane tasks; tomorrow's breakthroughs stand on them.", "author": "Continuous Improvement Lab"},
+    {"text": "Map the risks before they map you.", "author": "Resilience Cartography"},
+]
+
+if not QOTD_PATH.exists():
+    try:
+        with open(QOTD_PATH, "w", encoding="utf-8") as fh:
+            json.dump(DEFAULT_QOTD_QUOTES, fh, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+loaded_quotes = []
+try:
+    with open(QOTD_PATH, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    if isinstance(data, list):
+        for entry in data:
+            text_val = entry.get("text")
+            author_val = entry.get("author")
+            if text_val and author_val:
+                loaded_quotes.append({"text": str(text_val), "author": str(author_val)})
+except Exception:
+    loaded_quotes = []
+
+quote_pool = loaded_quotes if loaded_quotes else DEFAULT_QOTD_QUOTES
+now_kigali = datetime.now(QOTD_TIMEZONE)
+quote_cycle_date = now_kigali.date()
+if now_kigali.time() < QOTD_REFRESH_TIME:
+    quote_cycle_date = (now_kigali - timedelta(days=1)).date()
+quote_cycle_key = quote_cycle_date.isoformat()
+
+stored_date = st.session_state.get("qotd_last_date")
+stored_quote = st.session_state.get("qotd_last_quote")
+if stored_date != quote_cycle_key or not stored_quote:
+    quote_today = random.choice(quote_pool)
+    st.session_state["qotd_last_date"] = quote_cycle_key
+    st.session_state["qotd_last_quote"] = quote_today
+else:
+    quote_today = stored_quote
+
+quote_text = html.escape(str(quote_today.get("text", "")))
+quote_author = html.escape(str(quote_today.get("author", "")))
+
+st.markdown(
+    """
+    <style>
+    .qotd-bar {
+        background: #ffffff;
+        border-radius: 16px 16px 0 0;
+        min-height: 60px;
+        max-height: 70px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        margin: 0 auto 1.5rem auto;
+        padding: 0 1.75rem;
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+        color: #555555;
+        width: 100%;
+    }
+    .qotd-bar span {
+        font-style: italic;
+        font-size: 1rem;
+    }
+    .qotd-bar small {
+        display: block;
+        font-size: 0.85rem;
+        margin-top: 0.1rem;
+        letter-spacing: 0.02em;
+        color: #666666;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    f"""
+    <div class="qotd-bar">
+        <div>
+            <span>“{quote_text}”</span>
+            <small>— {quote_author}</small>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown('<div class="content-wrapper">', unsafe_allow_html=True)
 
 # Small UI to let users resize the hero and persist the setting
 with st.expander("UI Settings", expanded=False):
