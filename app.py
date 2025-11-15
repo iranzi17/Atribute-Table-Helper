@@ -3,6 +3,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 import base64
+import hashlib
 
 import geopandas as gpd
 import pandas as pd
@@ -19,6 +20,19 @@ PREVIEW_ROW_COUNT = 20
 
 # Persistent name-memory file (maps equipment_type -> user-chosen filename)
 NAME_MEMORY_PATH = Path(__file__).parent / "name_memory.json"
+USER_DATABASE_PATH = Path(__file__).parent / "users.json"
+ADMIN_ACCESS_CODE = os.getenv("ATTRIBUTE_HELPER_ADMIN_CODE", "approve-access")
+
+
+def rerun_app():
+    """Trigger a Streamlit rerun across both legacy and new APIs."""
+
+    rerun_callback = getattr(st, "rerun", None)
+    if rerun_callback is None:
+        rerun_callback = getattr(st, "experimental_rerun", None)
+    if rerun_callback is None:
+        raise RuntimeError("Unable to rerun Streamlit app: rerun API not available")
+    rerun_callback()
 
 
 def rerun_app():
@@ -313,6 +327,180 @@ def load_reference_preview(workbook_path: Path, sheet_name: str, max_rows: int =
         return pd.DataFrame()
 
 
+def load_user_database() -> dict:
+    """Load account information from disk."""
+
+    try:
+        if USER_DATABASE_PATH.exists():
+            with open(USER_DATABASE_PATH, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+                if isinstance(data, dict):
+                    return data
+    except Exception:
+        return {}
+    return {}
+
+
+def save_user_database(data: dict):
+    """Persist user account data to disk (best effort)."""
+
+    try:
+        with open(USER_DATABASE_PATH, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def register_user(username: str, password: str):
+    username = (username or "").strip()
+    if not username or not password:
+        return False, "Username and password are required."
+
+    user_db = load_user_database()
+    if username in user_db:
+        return False, "That username is already registered."
+
+    user_db[username] = {
+        "password": hash_password(password),
+        "approved": False,
+    }
+    save_user_database(user_db)
+    return True, "Account created. Awaiting admin approval before login."
+
+
+def authenticate_user(username: str, password: str):
+    username = (username or "").strip()
+    user_db = load_user_database()
+    record = user_db.get(username)
+    if not record:
+        return False, "User not found."
+
+    if record.get("password") != hash_password(password or ""):
+        return False, "Incorrect password."
+
+    if not record.get("approved"):
+        return False, "Account pending admin approval."
+
+    return True, ""
+
+
+def render_admin_controls(user_db: dict):
+    """Allow the owner to approve pending accounts with a shared code."""
+
+    with st.sidebar.expander("Admin approval", expanded=False):
+        st.caption(
+            "Enter the admin access code to approve pending accounts."
+            " Set ATTRIBUTE_HELPER_ADMIN_CODE to change the default code."
+        )
+        pending_users = [
+            username
+            for username, metadata in sorted(user_db.items())
+            if not metadata.get("approved")
+        ]
+        if not pending_users:
+            st.write("No pending registrations at the moment.")
+            return
+
+        selected_user = st.selectbox(
+            "Pending user", pending_users, key="pending_user_select"
+        )
+        admin_code = st.text_input(
+            "Admin access code",
+            type="password",
+            key="admin_code_input",
+        )
+        if st.button("Approve selected user", key="approve_user_button"):
+            if admin_code == ADMIN_ACCESS_CODE:
+                user_db[selected_user]["approved"] = True
+                save_user_database(user_db)
+                st.success(f"{selected_user} can now log in.")
+                st.experimental_rerun()
+            else:
+                st.error("Incorrect admin code.")
+
+
+def ensure_authenticated() -> bool:
+    """Render login/register UI and gate the rest of the app."""
+
+    st.sidebar.title("Account access")
+    user_db = load_user_database()
+
+    current_user = st.session_state.get("authenticated_user")
+    if current_user:
+        current_record = user_db.get(current_user)
+        if not current_record:
+            st.session_state.pop("authenticated_user", None)
+            current_user = None
+        elif not current_record.get("approved"):
+            st.sidebar.warning("Your account still needs admin approval.")
+            st.session_state.pop("authenticated_user", None)
+            current_user = None
+
+    if current_user:
+        st.sidebar.success(f"Logged in as {current_user}")
+        if st.sidebar.button("Log out"):
+            st.session_state.pop("authenticated_user", None)
+            st.experimental_rerun()
+        render_admin_controls(user_db)
+        return True
+
+    auth_mode = st.sidebar.radio(
+        "Need to log in or create an account?",
+        ["Login", "Register"],
+        key="auth_mode_choice",
+    )
+
+    if auth_mode == "Login":
+        with st.sidebar.form("login_form"):
+            login_username = st.text_input("Username", key="login_username")
+            login_password = st.text_input(
+                "Password", type="password", key="login_password"
+            )
+            login_submit = st.form_submit_button("Sign in")
+
+        if login_submit:
+            success, message = authenticate_user(login_username, login_password)
+            if success:
+                st.session_state["authenticated_user"] = login_username.strip()
+                st.sidebar.success("Login successful.")
+                st.experimental_rerun()
+            else:
+                st.sidebar.error(message)
+    else:
+        with st.sidebar.form("register_form"):
+            register_username = st.text_input(
+                "Choose a username", key="register_username"
+            )
+            register_password = st.text_input(
+                "Choose a password", type="password", key="register_password"
+            )
+            confirm_password = st.text_input(
+                "Confirm password", type="password", key="register_confirm_password"
+            )
+            register_submit = st.form_submit_button("Create account")
+
+        if register_submit:
+            if register_password != confirm_password:
+                st.sidebar.error("Passwords do not match.")
+            else:
+                success, message = register_user(
+                    register_username, register_password
+                )
+                if success:
+                    st.sidebar.success(message)
+                    user_db = load_user_database()
+                else:
+                    st.sidebar.error(message)
+
+    render_admin_controls(user_db)
+    st.sidebar.info(
+        "Register for an account and wait for approval before accessing the tools."
+    )
+    return False
 
 
 st.set_page_config(
@@ -320,6 +508,9 @@ st.set_page_config(
     page_icon="🗂️",
     layout="wide",
 )
+
+if not ensure_authenticated():
+    st.stop()
 
 # Use session-state values (if present) so slider changes show live preview
 hero_height_used = int(st.session_state.get("hero_height_slider", ui_hero_height))

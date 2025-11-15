@@ -18,6 +18,21 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+## Account access and approvals
+
+The app now requires users to register and log in before using any of the GeoPackage tools.
+
+1. New visitors open the app, switch to the **Register** tab in the sidebar, and create an account.
+2. Registrations remain locked until you approve them. Use the **Admin approval** expander in the sidebar, enter the admin code, and mark the pending account as approved.
+3. Once approved, the user can log in from the **Login** tab and the rest of the interface becomes available.
+
+The default admin access code is `approve-access`. Change it by setting the `ATTRIBUTE_HELPER_ADMIN_CODE` environment variable before launching Streamlit:
+
+```bash
+export ATTRIBUTE_HELPER_ADMIN_CODE="my-strong-secret"
+streamlit run app.py
+```
+
 ## Using built-in reference Excel workbooks
 
 1. Place your curated Excel file(s) inside the `reference_data/` folder.
@@ -37,3 +52,7 @@ python scripts/generate_sample_reference.py
 The script recreates `reference_data/sample_substations.xlsx` on demand using pandas + openpyxl, so the repository can stay binary-free while still giving you a ready-to-use template. You can inspect the expected schema in [`reference_data/TEMPLATE.md`](reference_data/TEMPLATE.md) before crafting your own workbook.
 
 Note: UI settings (hero height and left/right split) can be adjusted inside the running app under "UI Settings" — use the sliders for a live preview and click "Save UI settings" to persist choices across sessions.
+
+### No login required
+
+The app launches immediately without any registration or approval flow. If a leftover `users.json` file from the temporary login experiment is present, the app automatically deletes it and clears any associated session-state flags so you always land on the main workflow.
