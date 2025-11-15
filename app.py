@@ -388,7 +388,7 @@ st.markdown("""
         min-height: """ + str(hero_height_used) + """px;
         margin: 0 !important;
         padding: 0 !important;
-        margin-bottom: 2.5rem;
+        margin-bottom: 0;
         box-shadow: 0 8px 20px rgba(13, 71, 161, 0.15);
         border-radius: 0 !important;
         overflow: hidden;
@@ -692,8 +692,6 @@ st.markdown(
         <div class="subtitle">Professional geospatial data management for Rwanda's infrastructure</div>
     </div>
 </div>
-
-<div class="content-wrapper">
 """,
     unsafe_allow_html=True,
 )
@@ -732,6 +730,26 @@ DEFAULT_QOTD_QUOTES = [
     {"text": "Quality control in GIS is the compass that keeps projects true north.", "author": "Survey Integrity Team"},
     {"text": "Layer transparency teaches us that clarity often lives in overlap.", "author": "Visualization Studio"},
     {"text": "Engineers who map well build well.", "author": "Site Readiness Council"},
+    {"text": "Voltage without vision is noise; vision with voltage powers nations.", "author": "Grid Architects"},
+    {"text": "A disciplined circuit diagram is a promise of reliable light.", "author": "Powerline Atelier"},
+    {"text": "Great mapping is invisible; people only notice when it is missing.", "author": "Cartography Collective"},
+    {"text": "Survey stakes may move, but truth in data should not.", "author": "Field Integrity Corps"},
+    {"text": "Engineers turn constraints into catalysts for excellence.", "author": "Design Performance Lab"},
+    {"text": "Every raster pixel is a sensor whispering about the earth.", "author": "Imagery Insights"},
+    {"text": "Switchyards reward patience—the neatest diagrams prevent the loudest faults.", "author": "Substation Guild"},
+    {"text": "Model the future as carefully as you document the past.", "author": "Heritage Engineers"},
+    {"text": "A tidy attribute table shortens site visits more than any shortcut road.", "author": "Logistics Cartographers"},
+    {"text": "Precision thrives where curiosity meets calibration.", "author": "Metrology Circle"},
+    {"text": "Triangulate problems from multiple datasets before they triangulate you.", "author": "Spatial Troubleshooters"},
+    {"text": "Sustainable grids start with engineers who listen to the landscape.", "author": "Green Circuit Alliance"},
+    {"text": "A GIS without metadata is a switchboard without labels.", "author": "Operations Whisper"},
+    {"text": "Let excellence be the standard unit in every engineering drawing.", "author": "Drafting Virtuosi"},
+    {"text": "Electrical safety begins with accurate schematics and ends with disciplined crews.", "author": "Protection Relay Team"},
+    {"text": "Contours, cables, and code all obey the same rule: clarity first.", "author": "Interdisciplinary Forum"},
+    {"text": "When you blend spatial science with empathy, communities flourish.", "author": "Human-Centered GIS"},
+    {"text": "Testing assumptions is cheaper than rebuilding substations.", "author": "Reliability Taskforce"},
+    {"text": "Bring excellence to mundane tasks; tomorrow's breakthroughs stand on them.", "author": "Continuous Improvement Lab"},
+    {"text": "Map the risks before they map you.", "author": "Resilience Cartography"},
 ]
 
 if not QOTD_PATH.exists():
