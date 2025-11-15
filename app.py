@@ -35,6 +35,17 @@ def rerun_app():
     rerun_callback()
 
 
+def rerun_app():
+    """Trigger a Streamlit rerun across both legacy and new APIs."""
+
+    rerun_callback = getattr(st, "rerun", None)
+    if rerun_callback is None:
+        rerun_callback = getattr(st, "experimental_rerun", None)
+    if rerun_callback is None:
+        raise RuntimeError("Unable to rerun Streamlit app: rerun API not available")
+    rerun_callback()
+
+
 def load_name_memory() -> dict:
     """Load the name memory JSON file if present, otherwise return empty dict."""
     try:
