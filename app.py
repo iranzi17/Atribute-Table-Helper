@@ -22,13 +22,6 @@ PREVIEW_ROW_COUNT = 20
 NAME_MEMORY_PATH = Path(__file__).parent / "name_memory.json"
 USER_DATABASE_PATH = Path(__file__).parent / "users.json"
 ADMIN_ACCESS_CODE = os.getenv("ATTRIBUTE_HELPER_ADMIN_CODE", "approve-access")
-ADMIN_BYPASS_USERS = {
-    email.strip().lower()
-    for email in os.getenv(
-        "ATTRIBUTE_HELPER_ADMIN_EMAILS", "iranziprince35@gmail.com"
-    ).split(",")
-    if email.strip()
-}
 
 
 def load_name_memory() -> dict:
@@ -357,19 +350,8 @@ def register_user(username: str, password: str):
     return True, "Account created. Awaiting admin approval before login."
 
 
-def is_admin_bypass_user(username: str) -> bool:
-    return (username or "").strip().lower() in ADMIN_BYPASS_USERS
-
-
-def authenticate_user(username: str, password: str, admin_code: str | None = None):
+def authenticate_user(username: str, password: str):
     username = (username or "").strip()
-    if is_admin_bypass_user(username):
-        if admin_code == ADMIN_ACCESS_CODE:
-            return True, ""
-        if not admin_code:
-            return False, "Admin code required for this account."
-        return False, "Incorrect admin code."
-
     user_db = load_user_database()
     record = user_db.get(username)
     if not record:
@@ -450,30 +432,16 @@ def ensure_authenticated() -> bool:
         key="auth_mode_choice",
     )
 
-    st.sidebar.caption(
-        "Default admin code is 'approve-access' unless you override "
-        "ATTRIBUTE_HELPER_ADMIN_CODE."
-    )
-
     if auth_mode == "Login":
         with st.sidebar.form("login_form"):
             login_username = st.text_input("Username", key="login_username")
             login_password = st.text_input(
                 "Password", type="password", key="login_password"
             )
-            if is_admin_bypass_user(login_username):
-                st.info("This is an admin account. Provide the admin code instead of a password.")
-            login_admin_code = st.text_input(
-                "Admin access code (admin accounts only)",
-                type="password",
-                key="login_admin_code",
-            )
             login_submit = st.form_submit_button("Sign in")
 
         if login_submit:
-            success, message = authenticate_user(
-                login_username, login_password, login_admin_code
-            )
+            success, message = authenticate_user(login_username, login_password)
             if success:
                 st.session_state["authenticated_user"] = login_username.strip()
                 st.sidebar.success("Login successful.")
