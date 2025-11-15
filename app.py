@@ -2,6 +2,7 @@ import os
 import tempfile
 import zipfile
 from pathlib import Path
+import base64
 
 import geopandas as gpd
 import pandas as pd
@@ -12,6 +13,7 @@ from io import StringIO
 
 
 REFERENCE_DATA_DIR = Path(__file__).parent / "reference_data"
+HERO_IMAGE_PATH = Path(__file__).parent / "rwanda_small_map.jpg"
 SUPPORTED_REFERENCE_EXTENSIONS = (".xlsx", ".xlsm")
 PREVIEW_ROW_COUNT = 20
 
@@ -74,6 +76,16 @@ def save_ui_settings(mapping: dict):
         pass
 
 
+def load_base64_image(image_path: Path) -> str:
+    """Return the base64 representation of an image, or empty string on failure."""
+
+    try:
+        with open(image_path, "rb") as fh:
+            return base64.b64encode(fh.read()).decode("utf-8")
+    except Exception:
+        return ""
+
+
 # load UI settings
 ui_settings = load_ui_settings()
 
@@ -101,6 +113,15 @@ if "hero_mode" not in st.session_state:
     st.session_state["hero_mode"] = ui_settings.get("hero_mode", "percent")
 if "hero_left_px" not in st.session_state:
     st.session_state["hero_left_px"] = ui_settings.get("hero_left_px", DEFAULT_HERO_LEFT_PX)
+
+# Pre-load hero background image (best-effort)
+hero_bg_data = load_base64_image(HERO_IMAGE_PATH)
+hero_background_layers = [
+    "linear-gradient(135deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 250, 252, 0.95) 100%)"
+]
+if hero_bg_data:
+    hero_background_layers.append(f"url('data:image/jpeg;base64,{hero_bg_data}')")
+hero_background_css = ", ".join(hero_background_layers)
 
 
 def _reset_stream(stream):
@@ -346,9 +367,10 @@ st.markdown("""
     .hero-right {
         flex: """ + right_flex_css + """;
         background: linear-gradient(135deg, #f0f4f8 0%, #e8eef7 100%);
-        background-image: 
-            url("app/reference_data/rwanda_small_map.jpg");
-            linear-gradient(135deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 250, 252, 0.95) 100%);
+        background-image: """ + hero_background_css + """;
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
         display: flex;
         flex-direction: column;
         justify-content: center;
