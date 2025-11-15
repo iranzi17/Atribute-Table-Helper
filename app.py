@@ -4,9 +4,8 @@ import zipfile
 from pathlib import Path
 import base64
 from datetime import datetime, time, timedelta
+import hashlib
 import html
-import random
-from zoneinfo import ZoneInfo
 
 import geopandas as gpd
 import pandas as pd
@@ -700,7 +699,6 @@ st.markdown(
 # ---- QOTD system: load → select daily quote → show -----------------------
 QOTD_PATH = Path(__file__).parent / "quotes.json"
 QOTD_REFRESH_TIME = time(6, 0)
-QOTD_TIMEZONE = ZoneInfo("Africa/Kigali")
 DEFAULT_QOTD_QUOTES = [
     {"text": "Measure twice, map once; precision makes spatial insight powerful.", "author": "Surveyor's Axiom"},
     {"text": "Every coordinate tells a story waiting for an engineer to interpret it.", "author": "GeoSystems Lead"},
@@ -775,52 +773,44 @@ except Exception:
     loaded_quotes = []
 
 quote_pool = loaded_quotes if loaded_quotes else DEFAULT_QOTD_QUOTES
-now_kigali = datetime.now(QOTD_TIMEZONE)
-quote_cycle_date = now_kigali.date()
-if now_kigali.time() < QOTD_REFRESH_TIME:
-    quote_cycle_date = (now_kigali - timedelta(days=1)).date()
+now = datetime.now()
+quote_cycle_date = now.date()
+if now.time() < QOTD_REFRESH_TIME:
+    quote_cycle_date = (now - timedelta(days=1)).date()
 quote_cycle_key = quote_cycle_date.isoformat()
 
-stored_date = st.session_state.get("qotd_last_date")
-stored_quote = st.session_state.get("qotd_last_quote")
-if stored_date != quote_cycle_key or not stored_quote:
-    quote_today = random.choice(quote_pool)
-    st.session_state["qotd_last_date"] = quote_cycle_key
-    st.session_state["qotd_last_quote"] = quote_today
-else:
-    quote_today = stored_quote
+if st.session_state.get("qotd_cycle_key") != quote_cycle_key:
+    digest = hashlib.sha256(quote_cycle_key.encode("utf-8")).hexdigest()
+    quote_index = int(digest, 16) % len(quote_pool)
+    st.session_state["qotd_cycle_key"] = quote_cycle_key
+    st.session_state["qotd_quote"] = quote_pool[quote_index]
 
+quote_today = st.session_state.get("qotd_quote", quote_pool[0])
 quote_text = html.escape(str(quote_today.get("text", "")))
 quote_author = html.escape(str(quote_today.get("author", "")))
 
 st.markdown(
     """
     <style>
-    .qotd-bar {
-        background: #ffffff;
-        border-radius: 16px 16px 0 0;
-        min-height: 60px;
-        max-height: 70px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+    .qotd-box {
+        background: linear-gradient(135deg, #eef4ff 0%, #ffffff 100%);
+        border-radius: 12px;
+        padding: 1.5rem;
         text-align: center;
-        margin: 0 auto 1.5rem auto;
-        padding: 0 1.75rem;
-        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
-        color: #555555;
-        width: 100%;
+        margin: 1.5rem 0 0.5rem 0;
+        box-shadow: 0 20px 35px rgba(15, 23, 42, 0.08);
+        border: 1px solid rgba(148, 163, 184, 0.25);
     }
-    .qotd-bar span {
+    .qotd-text {
         font-style: italic;
-        font-size: 1rem;
+        font-size: 1.15rem;
+        color: #1f2937;
+        margin-bottom: 0.4rem;
     }
-    .qotd-bar small {
-        display: block;
-        font-size: 0.85rem;
-        margin-top: 0.1rem;
+    .qotd-author {
+        font-size: 0.95rem;
+        color: #475569;
         letter-spacing: 0.02em;
-        color: #666666;
     }
     </style>
     """,
@@ -829,17 +819,13 @@ st.markdown(
 
 st.markdown(
     f"""
-    <div class="qotd-bar">
-        <div>
-            <span>“{quote_text}”</span>
-            <small>— {quote_author}</small>
-        </div>
+    <div class="qotd-box">
+        <div class="qotd-text">“{quote_text}”</div>
+        <div class="qotd-author">— {quote_author}</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
-
-st.markdown('<div class="content-wrapper">', unsafe_allow_html=True)
 
 # Small UI to let users resize the hero and persist the setting
 with st.expander("UI Settings", expanded=False):
