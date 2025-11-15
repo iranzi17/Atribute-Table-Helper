@@ -116,9 +116,8 @@ if "hero_left_px" not in st.session_state:
 
 # Pre-load hero background image (best-effort)
 hero_bg_data = load_base64_image(HERO_IMAGE_PATH)
-# A subtle translucent gradient overlay keeps text readable without hiding the map
 hero_background_layers = [
-    "linear-gradient(135deg, rgba(255, 255, 255, 0.35) 0%, rgba(248, 250, 252, 0.55) 100%)"
+    "linear-gradient(135deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 250, 252, 0.95) 100%)"
 ]
 if hero_bg_data:
     hero_background_layers.append(f"url('data:image/jpeg;base64,{hero_bg_data}')")
