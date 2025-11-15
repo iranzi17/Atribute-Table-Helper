@@ -342,14 +342,13 @@ st.markdown("""
         border-top: 1px solid rgba(255, 255, 255, 0.2);
     }
     
-    /* Hero Right Column - Product Title + Rwanda Map Background */
+    /* Hero Right Column - Product Title + Background */
     .hero-right {
         flex: """ + right_flex_css + """;
-        /* Try a few common relative paths for the image; the browser will use the first one that exists */
-        background-image: url("./reference_data/rwanda_small_map.jpg"), url("./rwanda_small_map.jpg"), url("rwanda_small_map.jpg");
-        background-size: cover;
-        background-position: center;
-        background-attachment: fixed;
+        background: linear-gradient(135deg, #f0f4f8 0%, #e8eef7 100%);
+        background-image: 
+            url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%231565c0' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E"),
+            linear-gradient(135deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 250, 252, 0.95) 100%);
         display: flex;
         flex-direction: column;
         justify-content: center;
@@ -365,7 +364,7 @@ st.markdown("""
         left: 0;
         right: 0;
         bottom: 0;
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 250, 252, 0.95) 100%);
+        background: none;
         z-index: 1;
     }
     .hero-right h1,
