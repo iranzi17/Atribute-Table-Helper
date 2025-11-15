@@ -949,19 +949,12 @@ def sanitize_gdf_for_gpkg(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """
     Prepare a GeoDataFrame for writing to GeoPackage by:
     - Converting unsupported types (object, datetime64 with tz) to string.
-    - Removing columns with all NA/NaN values.
     - Truncating column names to 254 characters (GPKG limit).
     """
     gdf_copy = gdf.copy()
-    cols_to_drop = []
 
     for col in gdf_copy.columns:
         if col == gdf_copy.geometry.name:
-            continue
-
-        # Drop entirely empty columns to avoid GPKG write errors
-        if gdf_copy[col].isna().all():
-            cols_to_drop.append(col)
             continue
 
         col_dtype = gdf_copy[col].dtype
@@ -977,10 +970,6 @@ def sanitize_gdf_for_gpkg(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
                 gdf_copy[col] = gdf_copy[col].dt.tz_localize(None)
             except Exception:
                 gdf_copy[col] = gdf_copy[col].astype(str)
-
-    # Remove empty columns
-    if cols_to_drop:
-        gdf_copy.drop(columns=cols_to_drop, inplace=True)
 
     # Truncate column names to 254 chars (GPKG limit)
     gdf_copy.columns = [col[:254] for col in gdf_copy.columns]
