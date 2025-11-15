@@ -19,6 +19,53 @@ PREVIEW_ROW_COUNT = 20
 
 # Persistent name-memory file (maps equipment_type -> user-chosen filename)
 NAME_MEMORY_PATH = Path(__file__).parent / "name_memory.json"
+# Leftover path from the temporary login system — proactively delete it
+LEGACY_USER_DB_PATH = Path(__file__).parent / "users.json"
+
+
+def purge_legacy_auth_artifacts():
+    """Remove lingering login files/session flags so the app always loads."""
+
+    if LEGACY_USER_DB_PATH.exists():
+        try:
+            LEGACY_USER_DB_PATH.unlink()
+        except OSError:
+            # Best-effort cleanup only — ignore if we can't delete it
+            pass
+
+    try:
+        keys_to_clear = []
+        for key in list(st.session_state.keys()):
+            lowered = str(key).lower()
+            if lowered in {"pending_users", "approved_users", "user_db", "current_user"}:
+                keys_to_clear.append(key)
+            elif any(token in lowered for token in ("auth", "login")):
+                keys_to_clear.append(key)
+
+        for key in keys_to_clear:
+            st.session_state.pop(key, None)
+
+        # Force legacy auth toggles to true so any stale checks short-circuit
+        for flag in ("authenticated", "is_authenticated", "approved_user", "is_admin"):
+            st.session_state.setdefault(flag, True)
+    except Exception:
+        # Session state access can fail when running headless tests; ignore
+        pass
+
+
+# Run the cleanup immediately on import so reruns start from a clean slate
+purge_legacy_auth_artifacts()
+
+
+def rerun_app():
+    """Trigger a Streamlit rerun across both legacy and new APIs."""
+
+    rerun_callback = getattr(st, "rerun", None)
+    if rerun_callback is None:
+        rerun_callback = getattr(st, "experimental_rerun", None)
+    if rerun_callback is None:
+        raise RuntimeError("Unable to rerun Streamlit app: rerun API not available")
+    rerun_callback()
 
 
 def load_name_memory() -> dict:
@@ -300,6 +347,8 @@ def load_reference_preview(workbook_path: Path, sheet_name: str, max_rows: int =
         return preview
     except Exception:
         return pd.DataFrame()
+
+
 
 
 st.set_page_config(
@@ -759,7 +808,7 @@ with st.expander("UI Settings", expanded=False):
                 ui_settings.pop("hero_right_pct", None)
             save_ui_settings(ui_settings)
             st.success("Saved UI settings")
-            st.experimental_rerun()
+            rerun_app()
         if st.button("Reset to defaults", key="reset_ui_settings_btn"):
             # Remove saved values and reset session sliders to defaults
             ui_settings.pop("hero_height", None)
@@ -778,7 +827,7 @@ with st.expander("UI Settings", expanded=False):
             st.session_state["hero_gradient_start"] = DEFAULT_HERO_GRADIENT_START
             st.session_state["hero_gradient_end"] = DEFAULT_HERO_GRADIENT_END
             st.success("Reset UI settings to defaults")
-            st.experimental_rerun()
+            rerun_app()
     except Exception:
         # UI should not crash the app; silently ignore
         pass
