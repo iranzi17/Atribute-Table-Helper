@@ -1161,84 +1161,113 @@ with st.container():
         unsafe_allow_html=True,
     )
 
-    polygon_conversion_file = st.file_uploader(
+    polygon_conversion_files = st.file_uploader(
         "Upload GeoPackage (.gpkg) for centroid conversion",
         type=["gpkg"],
         key="polygon_to_point_gpkg",
+        accept_multiple_files=True,
     )
 
-    conversion_gdf = None
-    if polygon_conversion_file is not None:
-        temp_input_path = None
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp_in:
-                tmp_in.write(polygon_conversion_file.getbuffer())
-                temp_input_path = tmp_in.name
+    converted_packages = []
 
-            conversion_gdf = gpd.read_file(temp_input_path)
-            st.success(
-                f"Loaded GeoPackage with {len(conversion_gdf):,} feature(s) ready for conversion."
-            )
-        except Exception as exc:
+    if polygon_conversion_files:
+        for polygon_conversion_file in polygon_conversion_files:
+            st.markdown(f"**Processing:** {polygon_conversion_file.name}")
             conversion_gdf = None
-            st.error(f"Unable to read the uploaded GeoPackage: {exc}")
-        finally:
-            if temp_input_path and os.path.exists(temp_input_path):
-                os.remove(temp_input_path)
+            temp_input_path = None
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp_in:
+                    tmp_in.write(polygon_conversion_file.getbuffer())
+                    temp_input_path = tmp_in.name
 
-    if conversion_gdf is not None:
-        geom_types_raw = conversion_gdf.geom_type.dropna().unique().tolist()
-        geom_types_clean = sorted(
-            {str(gt) for gt in geom_types_raw if str(gt).strip()}
-        )
-        geom_types_display = ", ".join(geom_types_clean) if geom_types_clean else "Unknown"
-        st.markdown(f"**Detected geometry types:** {geom_types_display}")
+                conversion_gdf = gpd.read_file(temp_input_path)
+                st.success(
+                    f"Loaded GeoPackage with {len(conversion_gdf):,} feature(s) ready for conversion."
+                )
+            except Exception as exc:
+                conversion_gdf = None
+                st.error(f"Unable to read {polygon_conversion_file.name}: {exc}")
+            finally:
+                if temp_input_path and os.path.exists(temp_input_path):
+                    os.remove(temp_input_path)
 
-        has_polygon_geometry = any(
-            "polygon" in str(geom_type).lower()
-            for geom_type in geom_types_raw
-        )
+            if conversion_gdf is None:
+                continue
 
-        if has_polygon_geometry:
+            geom_types_raw = conversion_gdf.geom_type.dropna().unique().tolist()
+            geom_types_clean = sorted(
+                {str(gt) for gt in geom_types_raw if str(gt).strip()}
+            )
+            geom_types_display = ", ".join(geom_types_clean) if geom_types_clean else "Unknown"
+            st.markdown(f"Detected geometry types: {geom_types_display}")
+
+            has_polygon_geometry = any(
+                "polygon" in str(geom_type).lower()
+                for geom_type in geom_types_raw
+            )
+
+            if not has_polygon_geometry:
+                st.info(
+                    "This GeoPackage does not contain Polygon or MultiPolygon geometries, so no centroid conversion was performed."
+                )
+                continue
+
             try:
                 points_gdf = conversion_gdf.copy()
                 points_gdf["geometry"] = conversion_gdf.geometry.centroid
                 st.success("Centroid points generated for all polygon features.")
                 st.dataframe(points_gdf.head())
 
-                centroid_bytes = None
                 temp_output_path = None
+                safe_points = sanitize_gdf_for_gpkg(points_gdf)
                 try:
                     with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp_out:
                         temp_output_path = tmp_out.name
-
-                    safe_points = sanitize_gdf_for_gpkg(points_gdf)
                     safe_points.to_file(
                         temp_output_path,
                         driver="GPKG",
                         layer="centroid_points",
                     )
                     with open(temp_output_path, "rb") as converted:
-                        centroid_bytes = converted.read()
+                        converted_packages.append(
+                            (polygon_conversion_file.name, converted.read())
+                        )
                 except Exception as exc:
-                    centroid_bytes = None
-                    st.error(f"Failed to prepare centroid GeoPackage: {exc}")
+                    st.error(
+                        f"Failed to prepare centroid GeoPackage for {polygon_conversion_file.name}: {exc}"
+                    )
                 finally:
                     if temp_output_path and os.path.exists(temp_output_path):
                         os.remove(temp_output_path)
-
-                if centroid_bytes:
-                    st.download_button(
-                        "⬇ Download centroid points",
-                        data=centroid_bytes,
-                        file_name="centroid_points.gpkg",
-                        mime="application/geopackage+sqlite3",
-                    )
             except Exception as exc:
-                st.error(f"Failed to generate centroids: {exc}")
-        else:
-            st.info(
-                "The uploaded GeoPackage does not contain Polygon or MultiPolygon geometries, so no centroid conversion was performed."
+                st.error(f"Failed to generate centroids for {polygon_conversion_file.name}: {exc}")
+    else:
+        st.info("Upload at least one GeoPackage to begin conversion.")
+
+    if converted_packages:
+        zip_bytes = None
+        temp_zip_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_zip:
+                temp_zip_path = tmp_zip.name
+            with zipfile.ZipFile(temp_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for file_name, contents in converted_packages:
+                    zf.writestr(file_name, contents)
+            with open(temp_zip_path, "rb") as zip_file:
+                zip_bytes = zip_file.read()
+        except Exception as exc:
+            zip_bytes = None
+            st.error(f"Failed to package centroid GeoPackages: {exc}")
+        finally:
+            if temp_zip_path and os.path.exists(temp_zip_path):
+                os.remove(temp_zip_path)
+
+        if zip_bytes:
+            st.download_button(
+                "⬇ Download centroid GeoPackages (ZIP)",
+                data=zip_bytes,
+                file_name="centroid_points.zip",
+                mime="application/zip",
             )
 
     st.markdown('</div>', unsafe_allow_html=True)
