@@ -155,6 +155,13 @@ if hero_bg_data:
     hero_background_layers.append(f"url('data:image/jpeg;base64,{hero_bg_data}')")
 hero_background_css = ", ".join(hero_background_layers)
 
+# Pre-load hero background image (best-effort)
+hero_bg_data = load_base64_image(HERO_IMAGE_PATH)
+if hero_bg_data:
+    hero_background_css = f"url('data:image/jpeg;base64,{hero_bg_data}')"
+else:
+    hero_background_css = "none"
+
 
 def _reset_stream(stream):
     """Seek to the beginning of a stream if possible."""
