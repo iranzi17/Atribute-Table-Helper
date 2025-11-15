@@ -23,7 +23,7 @@ streamlit run app.py
 The app now requires users to register and log in before using any of the GeoPackage tools.
 
 1. New visitors open the app, switch to the **Register** tab in the sidebar, and create an account.
-2. Registrations remain locked until you approve them. Use the **Admin approval** expander in the sidebar, enter the admin code, and mark the pending account as approved. The default admin code is `approve-access` (override it by exporting `ATTRIBUTE_HELPER_ADMIN_CODE`).
+2. Registrations remain locked until you approve them. Use the **Admin approval** expander in the sidebar, enter the admin code, and mark the pending account as approved.
 3. Once approved, the user can log in from the **Login** tab and the rest of the interface becomes available.
 
 The default admin access code is `approve-access`. Change it by setting the `ATTRIBUTE_HELPER_ADMIN_CODE` environment variable before launching Streamlit:
@@ -32,17 +32,6 @@ The default admin access code is `approve-access`. Change it by setting the `ATT
 export ATTRIBUTE_HELPER_ADMIN_CODE="my-strong-secret"
 streamlit run app.py
 ```
-
-### Admins can skip registration entirely
-
-If you (or your support staff) do not want to create an end-user account, declare a list of admin email addresses using `ATTRIBUTE_HELPER_ADMIN_EMAILS` (comma-separated). Anyone logging in with one of those emails only needs to supply the admin code—no password, registration, or approval step required.
-
-```bash
-export ATTRIBUTE_HELPER_ADMIN_EMAILS="iranziprince35@gmail.com,second-admin@example.com"
-streamlit run app.py
-```
-
-> The default build already whitelists `iranziprince35@gmail.com`, matching the address you shared in this request.
 
 ## Using built-in reference Excel workbooks
 
