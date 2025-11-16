@@ -181,18 +181,32 @@ def _clean_column_name(name: Any) -> str:
     return text
 
 
-def normalize_for_compare(name: str) -> str:
-    return (
-        str(name)
-        .lower()
-        .replace(" ", "")
-        .replace("_", "")
-        .replace("-", "")
-        .replace("(", "")
-        .replace(")", "")
-        .replace("/", "")
-        .strip()
-    )
+def normalize_for_compare(name: Any) -> str:
+    text = "" if name is None else str(name)
+    text = text.lower()
+    for ch in INVISIBLE_HEADER_CHARS:
+        text = text.replace(ch, "")
+    for ch in (" ", "\t", "\n", "\r", "_", "-"):
+        text = text.replace(ch, "")
+    for ch in ("(", ")", "/"):
+        text = text.replace(ch, "")
+    return text.strip()
+
+
+def normalize_value_for_compare(value: Any) -> str:
+    if value is None:
+        text = ""
+    else:
+        try:
+            text = "" if pd.isna(value) else str(value)
+        except Exception:
+            text = str(value)
+    text = text.lower()
+    for ch in INVISIBLE_HEADER_CHARS:
+        text = text.replace(ch, "")
+    text = text.replace("_", "").replace("-", "")
+    text = " ".join(text.split()).strip()
+    return text
 
 
 def _finalize_dataframe_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -1193,6 +1207,8 @@ def merge_without_duplicates(
 
     rename_map: dict[str, str] = {}
     for col in incoming_df.columns:
+        if col == right_key:
+            continue
         norm = normalize_for_compare(col)
         if norm in gpkg_norm:
             rename_map[col] = gpkg_norm[norm]
@@ -1202,10 +1218,18 @@ def merge_without_duplicates(
 
     incoming_df = _finalize_dataframe_columns(incoming_df)
 
+    norm_key = "_norm_key"
+    counter = 1
+    while norm_key in base_gdf.columns or norm_key in incoming_df.columns:
+        norm_key = f"_norm_key_{counter}"
+        counter += 1
+
+    base_gdf[norm_key] = base_gdf[left_key].apply(normalize_value_for_compare)
+    incoming_df[norm_key] = incoming_df[right_key].apply(normalize_value_for_compare)
+
     merged = base_gdf.merge(
         incoming_df,
-        left_on=left_key,
-        right_on=right_key,
+        on=norm_key,
         how="left",
         suffixes=("", "_incoming"),
     )
@@ -1244,8 +1268,8 @@ def merge_without_duplicates(
             continue
         if col not in merged.columns:
             try:
-                mapping = incoming_df.set_index(right_key)[col].to_dict()
-                merged[col] = merged[left_key].map(mapping)
+                mapping = incoming_df.set_index(norm_key)[col].to_dict()
+                merged[col] = merged[norm_key].map(mapping)
                 try:
                     merged[col] = merged[col].astype(incoming_df[col].dtype)
                 except Exception:
