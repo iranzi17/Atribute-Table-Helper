@@ -7,7 +7,7 @@ from datetime import datetime, time, timedelta
 import hashlib
 import html
 import csv
-from typing import Any, List, Optional
+from typing import Any
 
 import geopandas as gpd
 import pandas as pd
@@ -318,32 +318,6 @@ def parse_pasted_tabular_text(text: str) -> pd.DataFrame:
     return _finalize_dataframe_columns(df)
 
 
-def _extract_excel_headers(source) -> Optional[List[str]]:
-    workbook = None
-    try:
-        _reset_stream(source)
-        workbook = load_workbook(source, read_only=True, data_only=True)
-        worksheet = workbook.active
-        header_values = next(
-            worksheet.iter_rows(min_row=1, max_row=1, values_only=True),
-            None,
-        )
-        if header_values is None:
-            return None
-        headers = []
-        for value in header_values:
-            headers.append("" if value is None else str(value))
-        return headers
-    except Exception:
-        return None
-    finally:
-        if workbook is not None:
-            try:
-                workbook.close()
-            except Exception:
-                pass
-
-
 def read_tabular_data(source):
     """Load a CSV/Excel file while preserving headers and raw text exactly."""
 
@@ -387,15 +361,8 @@ def read_tabular_data(source):
             dtype=str,
             na_filter=False,
             keep_default_na=False,
+            mangle_dupe_cols=False,
         )
-
-        header_values = _extract_excel_headers(source)
-        if header_values:
-            expected_len = len(df.columns)
-            if len(header_values) < expected_len:
-                header_values = header_values + [""] * (expected_len - len(header_values))
-            df.columns = header_values[:expected_len]
-
         return _finalize_dataframe_columns(df)
 
     raise ValueError(f"Unsupported file type: {suffix}")
