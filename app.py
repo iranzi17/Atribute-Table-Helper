@@ -198,7 +198,8 @@ def normalize_for_compare(name: Any) -> str:
     for ch in INVISIBLE_HEADER_CHARS:
         text = text.replace(ch, "")
     text = " ".join(text.split())
-    text = _strip_comparison_punctuation(text)
+    for ch in (" ", "_", "-"):
+        text = text.replace(ch, "")
     return text.strip()
 
 
@@ -1274,15 +1275,7 @@ def merge_without_duplicates(
         incoming_series = merged[incoming_name]
 
         if target_col:
-            incoming_non_empty_mask = incoming_series.notna()
-            try:
-                incoming_stripped = incoming_series.astype(str).str.strip()
-            except Exception:
-                incoming_stripped = incoming_series.astype(object).astype(str).str.strip()
-            incoming_non_empty_mask &= incoming_stripped.ne("")
-            update_mask = match_mask & incoming_non_empty_mask
-            if update_mask.any():
-                merged.loc[update_mask, target_col] = incoming_series[update_mask]
+            merged.loc[match_mask, target_col] = incoming_series[match_mask]
             if incoming_name != target_col:
                 merged.drop(columns=[incoming_name], inplace=True, errors="ignore")
         else:
