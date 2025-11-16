@@ -6,6 +6,8 @@ import base64
 from datetime import datetime, time, timedelta
 import hashlib
 import html
+import csv
+from typing import Any, List, Optional
 
 import geopandas as gpd
 import pandas as pd
@@ -198,63 +200,221 @@ def _reset_stream(stream):
             pass
 
 
+INVISIBLE_HEADER_CHARS = ["\ufeff", "\u200b", "\u200c", "\u200d", "\ufeff", "\xa0"]
+MAX_GPKG_NAME_LENGTH = 254
+
+
+def _clean_column_name(name: Any) -> str:
+    text = "" if name is None else str(name)
+    for ch in INVISIBLE_HEADER_CHARS:
+        text = text.replace(ch, "")
+    return text
+
+
+def _finalize_dataframe_columns(df: pd.DataFrame) -> pd.DataFrame:
+    if not isinstance(df, pd.DataFrame):
+        return df
+    df.columns = [_clean_column_name(col) for col in df.columns]
+    return df
+
+
+def _is_effectively_empty(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    try:
+        return pd.isna(value)
+    except Exception:
+        return False
+
+
+def _stringify_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except Exception:
+            return value.decode("utf-8", errors="replace")
+    if isinstance(value, (list, dict, set, tuple)):
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except Exception:
+            return str(value)
+    if isinstance(value, (datetime, timedelta)):
+        return value.isoformat()
+    return str(value)
+
+
+def ensure_valid_gpkg_dtypes(series: pd.Series) -> pd.Series:
+    if not isinstance(series, pd.Series):
+        return series
+
+    result = series.copy()
+
+    if pd.api.types.is_datetime64tz_dtype(result):
+        result = result.dt.tz_localize(None)
+    elif pd.api.types.is_datetime64_any_dtype(result):
+        # Already naive datetime — leave as-is
+        pass
+    elif pd.api.types.is_timedelta64_dtype(result):
+        result = result.astype(str)
+
+    if pd.api.types.is_object_dtype(result) or any(
+        isinstance(v, (list, dict, set, tuple)) for v in result.dropna().head(5)
+    ):
+        result = result.apply(_stringify_value)
+
+    # Mixed numeric columns (ints/floats) sometimes come through object dtype;
+    # after stringification we ensure NaNs are None for GPKG compatibility.
+    if pd.api.types.is_numeric_dtype(result):
+        result = result.astype("float64" if pd.api.types.is_float_dtype(result) else result.dtype)
+    return result
+
+
+def _truncate_column_name(name: str, used: dict) -> str:
+    base = name if len(name) <= MAX_GPKG_NAME_LENGTH else name[:MAX_GPKG_NAME_LENGTH]
+    candidate = base
+    counter = 1
+    while candidate in used:
+        suffix = f"_{counter}"
+        limit = MAX_GPKG_NAME_LENGTH - len(suffix)
+        candidate = (base[:limit] if len(base) > limit else base) + suffix
+        counter += 1
+    used[candidate] = True
+    return candidate
+
+
+def parse_pasted_tabular_text(text: str) -> pd.DataFrame:
+    cleaned = text.replace("\r", "\n")
+    cleaned = cleaned.replace("\n\n", "\n")
+    for ch in INVISIBLE_HEADER_CHARS:
+        cleaned = cleaned.replace(ch, "")
+    cleaned = cleaned.strip()
+    if not cleaned:
+        return pd.DataFrame()
+
+    sample = cleaned[:10000]
+    delimiters = ["\t", ",", ";", "|", "\u0001"]
+    sep = "\t" if "\t" in sample else ","
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=delimiters)
+        sep = dialect.delimiter
+    except csv.Error:
+        # Fall back to comma if sniffer fails
+        if ";" in sample and sep not in ("\t", ","):
+            sep = ";"
+
+    df = pd.read_csv(
+        StringIO(cleaned),
+        sep=sep,
+        engine="python",
+        dtype=str,
+        keep_default_na=False,
+    )
+    return _finalize_dataframe_columns(df)
+
+
+def _extract_excel_headers(source) -> Optional[List[str]]:
+    workbook = None
+    try:
+        _reset_stream(source)
+        workbook = load_workbook(source, read_only=True, data_only=True)
+        worksheet = workbook.active
+        header_values = next(
+            worksheet.iter_rows(min_row=1, max_row=1, values_only=True),
+            None,
+        )
+        if header_values is None:
+            return None
+        headers = []
+        for value in header_values:
+            headers.append("" if value is None else str(value))
+        return headers
+    except Exception:
+        return None
+    finally:
+        if workbook is not None:
+            try:
+                workbook.close()
+            except Exception:
+                pass
+
+
 def read_tabular_data(source):
-    """Load a CSV/Excel file, handling common encoding issues for CSV uploads."""
+    """Load a CSV/Excel file while preserving headers and raw text exactly."""
 
     if isinstance(source, (str, Path)):
         suffix = Path(source).suffix.lower()
     else:
         suffix = Path(source.name).suffix.lower()
 
-    if suffix == ".csv":
-        # First, behave exactly like the previous implementation by allowing
-        # pandas to pick its default encoding (UTF-8). This ensures that
-        # uploads that already worked continue to do so without any changes.
-        _reset_stream(source)
-        try:
-            return pd.read_csv(source)
-        except UnicodeDecodeError:
-            pass
+    csv_kwargs = {
+        "dtype": str,
+        "keep_default_na": False,
+        "na_filter": False,
+        "mangle_dupe_cols": False,
+        "sep": None,
+        "engine": "python",
+    }
 
-        # If a UnicodeDecodeError occurs, iterate through a few common
-        # fallbacks before resorting to a lossy-but-safe decode.
-        encodings = ("utf-8-sig", "latin-1")
+    if suffix == ".csv":
+        encodings = ("utf-8-sig", "utf-16", "utf-8", "latin-1")
         for encoding in encodings:
             _reset_stream(source)
             try:
-                return pd.read_csv(source, encoding=encoding)
+                df = pd.read_csv(source, encoding=encoding, **csv_kwargs)
+                return _finalize_dataframe_columns(df)
             except UnicodeDecodeError:
                 continue
 
         _reset_stream(source)
-        return pd.read_csv(source, encoding="utf-8", errors="replace")
+        df = pd.read_csv(
+            source,
+            encoding="utf-8",
+            errors="replace",
+            **csv_kwargs,
+        )
+        return _finalize_dataframe_columns(df)
 
     if suffix in {".xlsx", ".xlsm", ".xls"}:
         _reset_stream(source)
-        return pd.read_excel(source)
+        df = pd.read_excel(
+            source,
+            dtype=str,
+            na_filter=False,
+            keep_default_na=False,
+        )
+
+        header_values = _extract_excel_headers(source)
+        if header_values:
+            expected_len = len(df.columns)
+            if len(header_values) < expected_len:
+                header_values = header_values + [""] * (expected_len - len(header_values))
+            df.columns = header_values[:expected_len]
+
+        return _finalize_dataframe_columns(df)
 
     raise ValueError(f"Unsupported file type: {suffix}")
 
 
 def clean_empty_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """Drop fully-empty rows and forward-fill partial empty rows.
+    """Remove only rows that are entirely empty while preserving columns."""
 
-    This helps spreadsheets where repeated groups omit repeated values
-    (e.g., Substation/Bay/Name) on subsequent rows. Behaves as a best-effort
-    preprocessing step and leaves non-DataFrame inputs untouched.
-    """
     try:
         if not isinstance(df, pd.DataFrame):
             return df
-        # Remove rows that are completely empty
-        df = df.dropna(how="all")
         if df.empty:
             return df
-        # Forward-fill remaining blanks so grouped rows inherit prior values
-        df = df.ffill()
-        return df
+
+        mask = df.applymap(_is_effectively_empty)
+        cleaned = df.loc[~mask.all(axis=1)].copy()
+        cleaned.columns = list(df.columns)
+        return cleaned
     except Exception:
-        # On any failure, return the original DF to avoid breaking the workflow
         return df
 
 
@@ -981,18 +1141,10 @@ with st.container():
 
             if isinstance(paste_text, str) and paste_text.strip():
                 parsed = None
-                # Try autodetecting separator first
                 try:
-                    parsed = pd.read_csv(StringIO(paste_text), sep=None, engine="python")
+                    parsed = parse_pasted_tabular_text(paste_text)
                 except Exception:
-                    # Fallbacks: try tab, then comma
-                    try:
-                        parsed = pd.read_csv(StringIO(paste_text), sep="\t")
-                    except Exception:
-                        try:
-                            parsed = pd.read_csv(StringIO(paste_text), sep=",")
-                        except Exception:
-                            parsed = None
+                    parsed = None
 
                 if isinstance(parsed, pd.DataFrame):
                     # Show parsed DataFrame in an editable grid so users can tweak before merging
@@ -1084,27 +1236,27 @@ def sanitize_gdf_for_gpkg(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     - Truncating column names to 254 characters (GPKG limit).
     """
     gdf_copy = gdf.copy()
+    geometry_name = gdf_copy.geometry.name if hasattr(gdf_copy, "geometry") else None
+
+    used_names = {geometry_name: True} if geometry_name else {}
+    new_columns = []
+    for col in gdf_copy.columns:
+        if col == geometry_name:
+            new_columns.append(col)
+            continue
+        sanitized = _truncate_column_name(_clean_column_name(col), used_names)
+        new_columns.append(sanitized)
+    gdf_copy.columns = new_columns
 
     for col in gdf_copy.columns:
-        if col == gdf_copy.geometry.name:
+        if col == geometry_name:
             continue
-
-        col_dtype = gdf_copy[col].dtype
-        # Convert object dtype to string (safer for GPKG)
-        if col_dtype == "object":
-            try:
-                gdf_copy[col] = gdf_copy[col].astype(str)
-            except Exception:
-                pass
-        # Convert datetime with timezone to naive datetime or string
-        elif "datetime64" in str(col_dtype) and hasattr(gdf_copy[col].dtype, "tz"):
-            try:
-                gdf_copy[col] = gdf_copy[col].dt.tz_localize(None)
-            except Exception:
-                gdf_copy[col] = gdf_copy[col].astype(str)
-
-    # Truncate column names to 254 chars (GPKG limit)
-    gdf_copy.columns = [col[:254] for col in gdf_copy.columns]
+        series = ensure_valid_gpkg_dtypes(gdf_copy[col])
+        mask = pd.isna(series)
+        if mask.any():
+            series = series.astype(object)
+            series[mask] = None
+        gdf_copy[col] = series
 
     return gdf_copy
 
@@ -1117,24 +1269,31 @@ def merge_without_duplicates(
 ) -> gpd.GeoDataFrame:
     """Join df onto gdf but avoid duplicate columns when names collide."""
 
-    merged = gdf.merge(
-        df,
+    base_gdf = gdf.copy()
+    incoming_df = _finalize_dataframe_columns(df.copy())
+
+    merged = base_gdf.merge(
+        incoming_df,
         left_on=left_key,
         right_on=right_key,
         how="left",
         suffixes=("", "_incoming"),
     )
 
-    incoming_cols = [c for c in df.columns if c != right_key]
+    incoming_cols = [c for c in incoming_df.columns if c != right_key]
     for col in incoming_cols:
         incoming_name = f"{col}_incoming"
 
-        if col in gdf.columns:
+        if col in base_gdf.columns:
             if incoming_name in merged.columns:
                 merged[col] = merged[incoming_name].combine_first(merged[col])
-                merged.drop(columns=[incoming_name], inplace=True)
+                merged.drop(columns=[incoming_name], inplace=True, errors="ignore")
         elif incoming_name in merged.columns:
             merged.rename(columns={incoming_name: col}, inplace=True)
+
+        if col not in merged.columns and incoming_name in merged.columns:
+            merged[col] = merged[incoming_name]
+            merged.drop(columns=[incoming_name], inplace=True, errors="ignore")
 
     if right_key in merged.columns and right_key != left_key:
         merged.drop(columns=[right_key], inplace=True)
@@ -1147,18 +1306,24 @@ def merge_without_duplicates(
         if col not in merged.columns:
             try:
                 # Build mapping from right_key -> value for this column
-                mapping = df.set_index(right_key)[col].to_dict()
+                mapping = incoming_df.set_index(right_key)[col].to_dict()
                 merged[col] = merged[left_key].map(mapping)
                 # Cast to the same dtype as the source column when possible
                 try:
-                    merged[col] = merged[col].astype(df[col].dtype)
+                    merged[col] = merged[col].astype(incoming_df[col].dtype)
                 except Exception:
                     pass
             except Exception:
                 # If mapping fails for any reason, create an empty column
                 merged[col] = pd.NA
 
-    result = gpd.GeoDataFrame(merged, geometry=gdf.geometry.name, crs=gdf.crs)
+    geometry_name = base_gdf.geometry.name if hasattr(base_gdf, "geometry") else None
+    for col in merged.columns:
+        if col == geometry_name:
+            continue
+        merged[col] = ensure_valid_gpkg_dtypes(merged[col])
+
+    result = gpd.GeoDataFrame(merged, geometry=base_gdf.geometry.name, crs=base_gdf.crs)
     return sanitize_gdf_for_gpkg(result)
 
 
