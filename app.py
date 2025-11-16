@@ -28,18 +28,6 @@ NAME_MEMORY_PATH = Path(__file__).parent / "name_memory.json"
 
 def rerun_app():
     """Trigger a Streamlit rerun across both legacy and new APIs."""
-
-    rerun_callback = getattr(st, "rerun", None)
-    if rerun_callback is None:
-        rerun_callback = getattr(st, "experimental_rerun", None)
-    if rerun_callback is None:
-        raise RuntimeError("Unable to rerun Streamlit app: rerun API not available")
-    rerun_callback()
-
-
-def rerun_app():
-    """Trigger a Streamlit rerun across both legacy and new APIs."""
-
     rerun_callback = getattr(st, "rerun", None)
     if rerun_callback is None:
         rerun_callback = getattr(st, "experimental_rerun", None)
@@ -105,7 +93,6 @@ def save_ui_settings(mapping: dict):
 
 def load_base64_image(image_path: Path) -> str:
     """Return the base64 representation of an image, or empty string on failure."""
-
     try:
         with open(image_path, "rb") as fh:
             return base64.b64encode(fh.read()).decode("utf-8")
@@ -154,9 +141,8 @@ if "hero_gradient_end" not in st.session_state:
         "hero_gradient_end", ui_hero_gradient_end
     )
 
-# Pre-load hero background image (best-effort)
+# Pre-load hero background image (best-effort) with configurable gradient overlay
 hero_bg_data = load_base64_image(HERO_IMAGE_PATH)
-# A subtle translucent gradient overlay keeps text readable without hiding the map
 hero_gradient_start_used = float(
     min(max(st.session_state.get("hero_gradient_start", ui_hero_gradient_start), 0.0), 1.0)
 )
@@ -164,7 +150,8 @@ hero_gradient_end_used = float(
     min(max(st.session_state.get("hero_gradient_end", ui_hero_gradient_end), 0.0), 1.0)
 )
 hero_background_layers = [
-    "linear-gradient(135deg, rgba(255, 255, 255, {start:.2f}) 0%, rgba(248, 250, 252, {end:.2f}) 100%)".format(
+    "linear-gradient(135deg, rgba(255, 255, 255, {start:.2f}) 0%, "
+    "rgba(248, 250, 252, {end:.2f}) 100%)".format(
         start=hero_gradient_start_used,
         end=hero_gradient_end_used,
     )
@@ -173,26 +160,9 @@ if hero_bg_data:
     hero_background_layers.append(f"url('data:image/jpeg;base64,{hero_bg_data}')")
 hero_background_css = ", ".join(hero_background_layers)
 
-# Pre-load hero background image (best-effort)
-hero_bg_data = load_base64_image(HERO_IMAGE_PATH)
-hero_background_layers = [
-    "linear-gradient(135deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 250, 252, 0.95) 100%)"
-]
-if hero_bg_data:
-    hero_background_layers.append(f"url('data:image/jpeg;base64,{hero_bg_data}')")
-hero_background_css = ", ".join(hero_background_layers)
-
-# Pre-load hero background image (best-effort)
-hero_bg_data = load_base64_image(HERO_IMAGE_PATH)
-if hero_bg_data:
-    hero_background_css = f"url('data:image/jpeg;base64,{hero_bg_data}')"
-else:
-    hero_background_css = "none"
-
 
 def _reset_stream(stream):
     """Seek to the beginning of a stream if possible."""
-
     if hasattr(stream, "seek"):
         try:
             stream.seek(0)
@@ -250,6 +220,7 @@ def _stringify_value(value: Any) -> Any:
 
 
 def ensure_valid_gpkg_dtypes(series: pd.Series) -> pd.Series:
+    """Coerce a pandas Series into a GPKG-safe dtype."""
     if not isinstance(series, pd.Series):
         return series
 
@@ -263,15 +234,16 @@ def ensure_valid_gpkg_dtypes(series: pd.Series) -> pd.Series:
     elif pd.api.types.is_timedelta64_dtype(result):
         result = result.astype(str)
 
+    # If we see complex/mixed objects, convert everything to string
     if pd.api.types.is_object_dtype(result) or any(
         isinstance(v, (list, dict, set, tuple)) for v in result.dropna().head(5)
     ):
         result = result.apply(_stringify_value)
 
-    # Mixed numeric columns (ints/floats) sometimes come through object dtype;
-    # after stringification we ensure NaNs are None for GPKG compatibility.
     if pd.api.types.is_numeric_dtype(result):
+        # Ensure a concrete numeric dtype (avoids weird pandas extension types)
         result = result.astype("float64" if pd.api.types.is_float_dtype(result) else result.dtype)
+
     return result
 
 
@@ -289,6 +261,7 @@ def _truncate_column_name(name: str, used: dict) -> str:
 
 
 def parse_pasted_tabular_text(text: str) -> pd.DataFrame:
+    """Parse raw pasted TSV/CSV text into a DataFrame."""
     cleaned = text.replace("\r", "\n")
     cleaned = cleaned.replace("\n\n", "\n")
     for ch in INVISIBLE_HEADER_CHARS:
@@ -304,7 +277,6 @@ def parse_pasted_tabular_text(text: str) -> pd.DataFrame:
         dialect = csv.Sniffer().sniff(sample, delimiters=delimiters)
         sep = dialect.delimiter
     except csv.Error:
-        # Fall back to comma if sniffer fails
         if ";" in sample and sep not in ("\t", ","):
             sep = ";"
 
@@ -314,23 +286,28 @@ def parse_pasted_tabular_text(text: str) -> pd.DataFrame:
         engine="python",
         dtype=str,
         keep_default_na=False,
+        na_filter=False,
     )
     return _finalize_dataframe_columns(df)
 
 
 def read_tabular_data(source):
-    """Load a CSV/Excel file while preserving headers and raw text exactly."""
+    """
+    Load a CSV/Excel file while preserving headers and raw text as much as possible.
 
+    NOTE: We avoid deprecated/removed pandas kwargs (like mangle_dupe_cols)
+    so this stays compatible with pandas 2.x.
+    """
     if isinstance(source, (str, Path)):
         suffix = Path(source).suffix.lower()
     else:
         suffix = Path(source.name).suffix.lower()
 
+    # Common CSV options – autodetect separator via sep=None with python engine
     csv_kwargs = {
         "dtype": str,
         "keep_default_na": False,
         "na_filter": False,
-        "mangle_dupe_cols": False,
         "sep": None,
         "engine": "python",
     }
@@ -345,6 +322,7 @@ def read_tabular_data(source):
             except UnicodeDecodeError:
                 continue
 
+        # Last resort with replacement characters
         _reset_stream(source)
         df = pd.read_csv(
             source,
@@ -361,7 +339,6 @@ def read_tabular_data(source):
             dtype=str,
             na_filter=False,
             keep_default_na=False,
-            mangle_dupe_cols=False,
         )
         return _finalize_dataframe_columns(df)
 
@@ -369,8 +346,7 @@ def read_tabular_data(source):
 
 
 def clean_empty_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """Remove only rows that are entirely empty while preserving columns."""
-
+    """Remove only rows that are entirely empty while preserving ALL columns."""
     try:
         if not isinstance(df, pd.DataFrame):
             return df
@@ -387,7 +363,6 @@ def clean_empty_rows(df: pd.DataFrame) -> pd.DataFrame:
 
 def get_reference_workbooks():
     """Return mapping of workbook label -> path for bundled Excel files."""
-
     if not REFERENCE_DATA_DIR.exists():
         return {}
 
@@ -405,7 +380,6 @@ def get_reference_workbooks():
 
 def get_sheet_names(workbook_path: Path):
     """Return available sheet names for the selected workbook."""
-
     try:
         excel_file = pd.ExcelFile(workbook_path)
         return excel_file.sheet_names
@@ -415,7 +389,6 @@ def get_sheet_names(workbook_path: Path):
 
 def describe_reference_sheet(workbook_path: Path, sheet_name: str):
     """Return metadata describing the requested worksheet."""
-
     wb = None
     try:
         wb = load_workbook(workbook_path, read_only=True, data_only=True)
@@ -425,7 +398,6 @@ def describe_reference_sheet(workbook_path: Path, sheet_name: str):
             (),
         )
         headers = [value for value in header_values if value is not None]
-        # subtract header row from total count if present
         row_count = max(worksheet.max_row - (1 if headers else 0), 0)
         column_count = worksheet.max_column
         return {
@@ -442,7 +414,6 @@ def describe_reference_sheet(workbook_path: Path, sheet_name: str):
 
 def load_reference_preview(workbook_path: Path, sheet_name: str, max_rows: int = PREVIEW_ROW_COUNT):
     """Return a lightweight preview of the sheet for UI display."""
-
     try:
         preview = pd.read_excel(
             workbook_path,
@@ -557,7 +528,6 @@ st.markdown("""
     /* Hero Right Column - Product Title + Background */
     .hero-right {
         flex: """ + right_flex_css + """;
-        background: linear-gradient(135deg, #f0f4f8 0%, #e8eef7 100%);
         background-image: """ + hero_background_css + """;
         background-size: cover;
         background-position: center;
@@ -619,33 +589,6 @@ st.markdown("""
         margin-right: auto;
     }
     
-    /* Header Box - Professional landing section */
-    .header-box {
-        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-        color: #ffffff;
-        padding: 3rem 2rem;
-        border-radius: 12px;
-        margin-bottom: 2.5rem;
-        box-shadow: 0 8px 16px rgba(30, 60, 114, 0.2);
-    }
-    .header-box h1 {
-        font-size: 2.5rem;
-        font-weight: 700;
-        margin-bottom: 0.5rem;
-        letter-spacing: -0.5px;
-    }
-    .header-box h3 {
-        font-size: 1.3rem;
-        font-weight: 500;
-        margin-bottom: 1rem;
-        color: #e0e7ff;
-    }
-    .header-box p {
-        font-size: 1rem;
-        line-height: 1.6;
-        color: #c7d2e0;
-    }
-    
     /* Section Box - Main workflow containers */
     .section-box {
         background: #ffffff;
@@ -662,7 +605,6 @@ st.markdown("""
         border-left-color: #3b82f6;
     }
     
-    /* Section Title */
     .section-title {
         font-size: 1.4rem;
         font-weight: 600;
@@ -681,7 +623,6 @@ st.markdown("""
         border-radius: 2px;
     }
     
-    /* Subsection text */
     .section-subtext {
         color: #4b5563;
         margin-bottom: 1.5rem;
@@ -689,7 +630,6 @@ st.markdown("""
         line-height: 1.5;
     }
     
-    /* File Uploader styling */
     .stFileUploader {
         border-radius: 12px !important;
     }
@@ -700,7 +640,6 @@ st.markdown("""
         background: linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(79, 172, 254, 0.02) 100%) !important;
     }
     
-    /* Inputs and Selectbox */
     .stTextInput > div > div,
     .stSelectbox > div > div,
     .stDataEditor > div {
@@ -713,7 +652,6 @@ st.markdown("""
         box-shadow: 0 0 0 3px rgba(42, 82, 152, 0.1) !important;
     }
     
-    /* Radio button styling */
     .stRadio > label {
         font-weight: 500;
         color: #1f2a37;
@@ -722,7 +660,6 @@ st.markdown("""
         gap: 1rem;
     }
     
-    /* Button styling */
     .stButton button {
         font-weight: 600;
         padding: 0.75rem 1.5rem !important;
@@ -737,26 +674,6 @@ st.markdown("""
         transform: translateY(-2px);
     }
     
-    /* Success/Warning/Info messages */
-    .stSuccess, .stWarning, .stInfo {
-        border-radius: 8px !important;
-        padding: 1rem !important;
-    }
-    
-    /* Expander styling */
-    .streamlit-expanderHeader {
-        background-color: #f9fafb;
-        border-radius: 8px;
-        font-weight: 600;
-        color: #1f2a37;
-    }
-    
-    /* Data editor styling */
-    .stDataEditor {
-        border-radius: 8px !important;
-    }
-    
-    /* Footer */
     footer {
         visibility: hidden;
     }
@@ -769,7 +686,6 @@ st.markdown("""
         margin-top: 3rem;
     }
     
-    /* Responsive adjustments */
     @media (max-width: 768px) {
         .hero-container {
             flex-direction: column;
@@ -784,9 +700,6 @@ st.markdown("""
         }
         .hero-right h1 {
             font-size: 1.8rem;
-        }
-        .header-box h1 {
-            font-size: 2rem;
         }
         .section-box {
             padding: 1.5rem;
@@ -823,9 +736,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---- QOTD system: load → select daily quote → show -----------------------
+# ---------------------- QUOTE OF THE DAY ---------------------------------
 QOTD_PATH = Path(__file__).parent / "quotes.json"
 QOTD_REFRESH_TIME = time(6, 0)
+
 DEFAULT_QOTD_QUOTES = [
     {"text": "Measure twice, map once; precision makes spatial insight powerful.", "author": "Surveyor's Axiom"},
     {"text": "Every coordinate tells a story waiting for an engineer to interpret it.", "author": "GeoSystems Lead"},
@@ -954,7 +868,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Small UI to let users resize the hero and persist the setting
+# ---------------- UI SETTINGS EXPANDER -----------------
 with st.expander("UI Settings", expanded=False):
     try:
         hero_height_new = st.slider(
@@ -984,7 +898,6 @@ with st.expander("UI Settings", expanded=False):
             key="hero_gradient_end",
         )
 
-        # Sizing mode: percent-based or fixed-left (px) where right column expands
         st.markdown("**Hero sizing mode**")
         hero_mode_new = st.radio(
             "Choose how the hero columns size:",
@@ -994,7 +907,6 @@ with st.expander("UI Settings", expanded=False):
         )
 
         if st.session_state.get("hero_mode", "percent") == "percent":
-            # Allow unbounded numeric input for left/right percentages so user can extend freely
             hero_left_new = st.number_input(
                 "Hero left column width (%) - enter any integer (no limit)",
                 value=int(st.session_state.get("hero_left_pct", ui_hero_left_pct)),
@@ -1009,7 +921,6 @@ with st.expander("UI Settings", expanded=False):
                 key="hero_right_pct",
             )
         else:
-            # Fixed-left mode: left column is a fixed pixel width, right column flexes to fill
             hero_left_px_new = st.number_input(
                 "Hero left column width (px)",
                 value=int(st.session_state.get("hero_left_px", DEFAULT_HERO_LEFT_PX)),
@@ -1031,18 +942,15 @@ with st.expander("UI Settings", expanded=False):
             if ui_settings["hero_mode"] == "percent":
                 ui_settings["hero_left_pct"] = int(st.session_state.get("hero_left_pct", hero_left_new))
                 ui_settings["hero_right_pct"] = int(st.session_state.get("hero_right_pct", hero_right_new))
-                # remove fixed-left px if present
                 ui_settings.pop("hero_left_px", None)
             else:
                 ui_settings["hero_left_px"] = int(st.session_state.get("hero_left_px", hero_left_px_new))
-                # remove percent keys if present
                 ui_settings.pop("hero_left_pct", None)
                 ui_settings.pop("hero_right_pct", None)
             save_ui_settings(ui_settings)
             st.success("Saved UI settings")
             rerun_app()
         if st.button("Reset to defaults", key="reset_ui_settings_btn"):
-            # Remove saved values and reset session sliders to defaults
             ui_settings.pop("hero_height", None)
             ui_settings.pop("hero_left_pct", None)
             ui_settings.pop("hero_right_pct", None)
@@ -1061,10 +969,9 @@ with st.expander("UI Settings", expanded=False):
             st.success("Reset UI settings to defaults")
             rerun_app()
     except Exception:
-        # UI should not crash the app; silently ignore
         pass
 
-# ---- Single file workflow --------------------------------------------------
+# ---------------------- SINGLE FILE MERGE WORKFLOW ------------------------
 reference_workbooks = get_reference_workbooks()
 
 with st.container():
@@ -1092,7 +999,6 @@ with st.container():
     workbook_label = None
     pasted_df = None
 
-    # Show paste editor only when "Paste data directly" is selected
     if data_source == "Paste data directly":
         with st.container():
             st.markdown("##### Paste Your Tabular Data")
@@ -1114,19 +1020,18 @@ with st.container():
                     parsed = None
 
                 if isinstance(parsed, pd.DataFrame):
-                    # Show parsed DataFrame in an editable grid so users can tweak before merging
                     edited = st.data_editor(parsed, num_rows="dynamic", key="pasted_data_editor_direct")
                     if isinstance(edited, pd.DataFrame) and not edited.dropna(how="all").empty:
                         pasted_df = clean_empty_rows(edited)
-                        # Persist pasted DataFrame into session_state so it survives reruns
                         try:
                             st.session_state["df_from_paste"] = pasted_df
                         except Exception:
                             pass
                         st.success("Pasted data detected — it will be used for merging.")
                 else:
-                    st.warning("Unable to parse pasted text as a table. Please ensure it's tabular (TSV/CSV) or paste directly from Excel cells.")
-            # If the text area is empty, remove any previously saved pasted DF from session state
+                    st.warning(
+                        "Unable to parse pasted text as a table. Please ensure it's tabular (TSV/CSV) or paste directly from Excel cells."
+                    )
             if not paste_text or not str(paste_text).strip():
                 if "df_from_paste" in st.session_state:
                     try:
@@ -1170,7 +1075,6 @@ with st.container():
         "<p class='section-subtext'>Customize how the updated GeoPackage will be saved. The same name is used for the output layer.</p>",
         unsafe_allow_html=True,
     )
-    # Detect equipment type for name-memory suggestions
     equipment_type = None
     if workbook_label:
         equipment_type = workbook_label
@@ -1180,10 +1084,7 @@ with st.container():
         except Exception:
             equipment_type = None
 
-    # Auto-generated default name for this single-file workflow
     auto_name = "updated_clean"
-
-    # Suggested name: either previously saved name for this equipment_type or the auto-generated name
     suggested_name = name_memory.get(equipment_type, auto_name) if equipment_type else auto_name
 
     output_name = st.text_input(
@@ -1199,8 +1100,9 @@ layer_name = output_name.replace(" ", "_")
 def sanitize_gdf_for_gpkg(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """
     Prepare a GeoDataFrame for writing to GeoPackage by:
-    - Converting unsupported types (object, datetime64 with tz) to string.
+    - Converting unsupported types (object, datetime64 with tz) to GPKG-safe values.
     - Truncating column names to 254 characters (GPKG limit).
+    - PRESERVING empty columns (no dropping all-NaN fields).
     """
     gdf_copy = gdf.copy()
     geometry_name = gdf_copy.geometry.name if hasattr(gdf_copy, "geometry") else None
@@ -1235,7 +1137,6 @@ def merge_without_duplicates(
     right_key: str,
 ) -> gpd.GeoDataFrame:
     """Join df onto gdf but avoid duplicate columns when names collide."""
-
     base_gdf = gdf.copy()
     incoming_df = _finalize_dataframe_columns(df.copy())
 
@@ -1265,23 +1166,17 @@ def merge_without_duplicates(
     if right_key in merged.columns and right_key != left_key:
         merged.drop(columns=[right_key], inplace=True)
 
-    # Ensure any incoming-only columns are present in the merged result.
-    # Some join edge-cases (different dtypes, duplicate names, or unexpected suffixing)
-    # can cause an incoming column to be missing. As a safe fallback, map values
-    # from `df` by the right_key onto the merged frame using left_key.
+    # Fallback mapping to ensure all incoming-only columns exist
     for col in incoming_cols:
         if col not in merged.columns:
             try:
-                # Build mapping from right_key -> value for this column
                 mapping = incoming_df.set_index(right_key)[col].to_dict()
                 merged[col] = merged[left_key].map(mapping)
-                # Cast to the same dtype as the source column when possible
                 try:
                     merged[col] = merged[col].astype(incoming_df[col].dtype)
                 except Exception:
                     pass
             except Exception:
-                # If mapping fails for any reason, create an empty column
                 merged[col] = pd.NA
 
     geometry_name = base_gdf.geometry.name if hasattr(base_gdf, "geometry") else None
@@ -1296,7 +1191,6 @@ def merge_without_duplicates(
 
 def read_pairs_from_zip(uploaded_zip):
     """Return list of datasets extracted from an uploaded ZIP archive."""
-
     dataset_pairs = []
     with tempfile.TemporaryDirectory() as tmpdir:
         zip_path = os.path.join(tmpdir, uploaded_zip.name)
@@ -1349,7 +1243,6 @@ if gpkg_file and data_ready:
     gdf = gpd.read_file(gpkg_file)
     st.success("GeoPackage Loaded ✔")
 
-    # Prefer session-stored pasted DF if available; otherwise fall back to uploaded file or stored reference
     df_from_paste = st.session_state.get("df_from_paste")
     if isinstance(df_from_paste, pd.DataFrame) and not df_from_paste.dropna(how="all").empty:
         df = df_from_paste
@@ -1383,14 +1276,10 @@ if gpkg_file and data_ready:
                 temp_path = tmp.name
 
             try:
-                # Sanitize one more time before writing to handle any edge cases
                 safe_gdf = sanitize_gdf_for_gpkg(merged_gdf)
-                # If an equipment_type was detected and the user typed a custom name,
-                # persist it so future sessions reuse the name.
                 try:
                     if equipment_type:
                         existing = name_memory.get(equipment_type)
-                        # If output_name differs from saved mapping and differs from auto_name, save it
                         if output_name and output_name != existing and output_name != auto_name:
                             set_saved_name(equipment_type, output_name, name_memory)
                 except Exception:
@@ -1412,8 +1301,7 @@ if gpkg_file and data_ready:
         except Exception as exc:
             st.error(f"Error while merging: {exc}")
 
-
-# ---- Geometry conversion (Polygon -> Point) ---------------------------------
+# ------------------- GEOMETRY CONVERSION (POLYGON → POINT) -----------------
 with st.container():
     st.markdown('<div class="section-box tertiary">', unsafe_allow_html=True)
     st.markdown(
@@ -1421,7 +1309,7 @@ with st.container():
         unsafe_allow_html=True,
     )
     st.markdown(
-        "<p class='section-subtext'>Upload a GeoPackage to convert all polygon features into centroid points while keeping every attribute intact.</p>",
+        "<p class='section-subtext'>Upload one or more GeoPackages to convert all polygon features into centroid points while keeping every attribute intact.</p>",
         unsafe_allow_html=True,
     )
 
@@ -1459,9 +1347,7 @@ with st.container():
                 continue
 
             geom_types_raw = conversion_gdf.geom_type.dropna().unique().tolist()
-            geom_types_clean = sorted(
-                {str(gt) for gt in geom_types_raw if str(gt).strip()}
-            )
+            geom_types_clean = sorted({str(gt) for gt in geom_types_raw if str(gt).strip()})
             geom_types_display = ", ".join(geom_types_clean) if geom_types_clean else "Unknown"
             st.markdown(f"Detected geometry types: {geom_types_display}")
 
@@ -1487,6 +1373,7 @@ with st.container():
                 try:
                     with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp_out:
                         temp_output_path = tmp_out.name
+                    # Keep internal layer name simple; file name will be original name
                     safe_points.to_file(
                         temp_output_path,
                         driver="GPKG",
@@ -1536,8 +1423,7 @@ with st.container():
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-
-# ---- ZIP bundle workflow ----------------------------------------------------
+# --------------------- ZIP BUNDLE WORKFLOW --------------------------------
 with st.container():
     st.markdown('<div class="section-box tertiary">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Batch ZIP Processing</div>', unsafe_allow_html=True)
@@ -1593,7 +1479,6 @@ with st.container():
                     dataset["df"].columns,
                     key=f"right_key_{idx}",
                 )
-                # Suggest previously saved name for this equipment (dataset base) if available
                 ds_equipment_type = dataset["base"]
                 ds_auto = f"{dataset['base']}_updated"
                 ds_suggested = name_memory.get(ds_equipment_type, ds_auto)
@@ -1628,9 +1513,7 @@ with st.container():
                         temp_path = tmp.name
 
                     try:
-                        # Sanitize one more time before writing to handle any edge cases
                         safe_gdf = sanitize_gdf_for_gpkg(merged_gdf)
-                        # Persist custom output name for this dataset's equipment type if changed
                         try:
                             ds_equipment_type = dataset["base"]
                             existing = name_memory.get(ds_equipment_type)
