@@ -1180,25 +1180,23 @@ def merge_without_duplicates(
     left_key: str,
     right_key: str,
 ) -> gpd.GeoDataFrame:
-    """Join df onto gdf but avoid duplicate columns when names collide."""
+    """Join df onto gdf with Excel values overwriting non-empty GPKG values."""
+
     base_gdf = gdf.copy()
     incoming_df = df.copy()
 
-    # --- New normalization unification layer ---
-    # Build normalized lookup for GPKG columns
+    # Normalize incoming columns to match existing GeoPackage columns
     gpkg_norm = {
         normalize_for_compare(col): col
         for col in base_gdf.columns
     }
 
-    # Prepare a renaming map for df
-    rename_map = {}
+    rename_map: dict[str, str] = {}
     for col in incoming_df.columns:
         norm = normalize_for_compare(col)
         if norm in gpkg_norm:
             rename_map[col] = gpkg_norm[norm]
 
-    # Apply the renaming
     if rename_map:
         incoming_df = incoming_df.rename(columns=rename_map)
 
@@ -1212,26 +1210,38 @@ def merge_without_duplicates(
         suffixes=("", "_incoming"),
     )
 
+    geometry_name = base_gdf.geometry.name if hasattr(base_gdf, "geometry") else None
     incoming_cols = [c for c in incoming_df.columns if c != right_key]
+
     for col in incoming_cols:
         incoming_name = f"{col}_incoming"
 
-        if col in base_gdf.columns:
-            if incoming_name in merged.columns:
-                merged[col] = merged[incoming_name].combine_first(merged[col])
+        if incoming_name in merged.columns:
+            if col == geometry_name:
                 merged.drop(columns=[incoming_name], inplace=True, errors="ignore")
-        elif incoming_name in merged.columns:
-            merged.rename(columns={incoming_name: col}, inplace=True)
+                continue
 
-        if col not in merged.columns and incoming_name in merged.columns:
-            merged[col] = merged[incoming_name]
+            incoming_series = merged[incoming_name]
+
+            if col in base_gdf.columns:
+                merged[col] = incoming_series.where(
+                    incoming_series.notna()
+                    & (incoming_series.astype(str).str.strip() != ""),
+                    merged[col],
+                )
+            else:
+                merged[col] = incoming_series
+
             merged.drop(columns=[incoming_name], inplace=True, errors="ignore")
 
+    # Remove any stray right-key column copy
     if right_key in merged.columns and right_key != left_key:
         merged.drop(columns=[right_key], inplace=True)
 
-    # Fallback mapping to ensure all incoming-only columns exist
+    # Ensure all incoming-only columns exist even if the merge produced no _incoming column
     for col in incoming_cols:
+        if col == geometry_name:
+            continue
         if col not in merged.columns:
             try:
                 mapping = incoming_df.set_index(right_key)[col].to_dict()
@@ -1243,13 +1253,31 @@ def merge_without_duplicates(
             except Exception:
                 merged[col] = pd.NA
 
-    geometry_name = base_gdf.geometry.name if hasattr(base_gdf, "geometry") else None
+    # Drop any leftover *_incoming columns just in case
+    incoming_suffix_cols = [c for c in merged.columns if c.endswith("_incoming")]
+    if incoming_suffix_cols:
+        merged.drop(columns=incoming_suffix_cols, inplace=True, errors="ignore")
+
+    # Ensure no duplicate or near-duplicate columns remain
+    normalized_seen = {}
+    columns_to_drop = []
+    for col in merged.columns:
+        if col == geometry_name:
+            continue
+        norm = normalize_for_compare(col)
+        if norm in normalized_seen:
+            columns_to_drop.append(col)
+        else:
+            normalized_seen[norm] = col
+    if columns_to_drop:
+        merged.drop(columns=columns_to_drop, inplace=True, errors="ignore")
+
     for col in merged.columns:
         if col == geometry_name:
             continue
         merged[col] = ensure_valid_gpkg_dtypes(merged[col])
 
-    result = gpd.GeoDataFrame(merged, geometry=base_gdf.geometry.name, crs=base_gdf.crs)
+    result = gpd.GeoDataFrame(merged, geometry=geometry_name, crs=base_gdf.crs)
     return sanitize_gdf_for_gpkg(result)
 
 
