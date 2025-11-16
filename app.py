@@ -178,7 +178,8 @@ def _clean_column_name(name: Any) -> str:
     text = "" if name is None else str(name)
     for ch in INVISIBLE_HEADER_CHARS:
         text = text.replace(ch, "")
-    return text
+    text = " ".join(text.split())
+    return text.strip()
 
 
 def normalize_for_compare(name: Any) -> str:
@@ -186,9 +187,8 @@ def normalize_for_compare(name: Any) -> str:
     text = text.lower()
     for ch in INVISIBLE_HEADER_CHARS:
         text = text.replace(ch, "")
-    for ch in (" ", "\t", "\n", "\r", "_", "-"):
-        text = text.replace(ch, "")
-    for ch in ("(", ")", "/"):
+    text = " ".join(text.split())
+    for ch in (" ", "_", "-"):
         text = text.replace(ch, "")
     return text.strip()
 
@@ -1199,24 +1199,34 @@ def merge_without_duplicates(
     base_gdf = gdf.copy()
     incoming_df = df.copy()
 
+    original_incoming_columns = list(incoming_df.columns)
+    incoming_df = _finalize_dataframe_columns(incoming_df)
+    cleaned_incoming_columns = list(incoming_df.columns)
+    column_lookup = {
+        original: cleaned
+        for original, cleaned in zip(original_incoming_columns, cleaned_incoming_columns)
+    }
+
+    incoming_right_key = column_lookup.get(right_key, _clean_column_name(right_key))
+    if incoming_right_key not in incoming_df.columns:
+        incoming_right_key = right_key
+
+    geometry_name = base_gdf.geometry.name if hasattr(base_gdf, "geometry") else None
+
     # Normalize incoming columns to match existing GeoPackage columns
     gpkg_norm = {
         normalize_for_compare(col): col
         for col in base_gdf.columns
+        if col != geometry_name
     }
 
-    rename_map: dict[str, str] = {}
+    normalized_matches: dict[str, str] = {}
     for col in incoming_df.columns:
-        if col == right_key:
+        if col == incoming_right_key:
             continue
         norm = normalize_for_compare(col)
         if norm in gpkg_norm:
-            rename_map[col] = gpkg_norm[norm]
-
-    if rename_map:
-        incoming_df = incoming_df.rename(columns=rename_map)
-
-    incoming_df = _finalize_dataframe_columns(incoming_df)
+            normalized_matches[col] = gpkg_norm[norm]
 
     norm_key = "_norm_key"
     counter = 1
@@ -1225,7 +1235,7 @@ def merge_without_duplicates(
         counter += 1
 
     base_gdf[norm_key] = base_gdf[left_key].apply(normalize_value_for_compare)
-    incoming_df[norm_key] = incoming_df[right_key].apply(normalize_value_for_compare)
+    incoming_df[norm_key] = incoming_df[incoming_right_key].apply(normalize_value_for_compare)
 
     merged = base_gdf.merge(
         incoming_df,
@@ -1234,37 +1244,43 @@ def merge_without_duplicates(
         suffixes=("", "_incoming"),
     )
 
-    geometry_name = base_gdf.geometry.name if hasattr(base_gdf, "geometry") else None
-    incoming_cols = [c for c in incoming_df.columns if c != right_key]
+    match_mask = merged[norm_key].isin(incoming_df[norm_key].dropna())
+
+    incoming_cols = [c for c in incoming_df.columns if c != incoming_right_key]
+    matched_incoming_columns = set(normalized_matches.keys())
 
     for col in incoming_cols:
-        incoming_name = f"{col}_incoming"
+        base_has_same_name = col in base_gdf.columns
+        incoming_name = f"{col}_incoming" if base_has_same_name else col
 
-        if incoming_name in merged.columns:
-            if col == geometry_name:
-                merged.drop(columns=[incoming_name], inplace=True, errors="ignore")
-                continue
+        if incoming_name not in merged.columns:
+            continue
 
-            incoming_series = merged[incoming_name]
+        target_col = normalized_matches.get(col)
 
-            if col in base_gdf.columns:
-                merged[col] = incoming_series.where(
-                    incoming_series.notna()
-                    & (incoming_series.astype(str).str.strip() != ""),
-                    merged[col],
-                )
-            else:
-                merged[col] = incoming_series
-
+        if target_col == geometry_name or col == geometry_name:
             merged.drop(columns=[incoming_name], inplace=True, errors="ignore")
+            continue
+
+        incoming_series = merged[incoming_name]
+
+        if target_col:
+            merged.loc[match_mask, target_col] = incoming_series[match_mask]
+            if incoming_name != target_col:
+                merged.drop(columns=[incoming_name], inplace=True, errors="ignore")
+        else:
+            if base_has_same_name and incoming_name.endswith("_incoming"):
+                merged.rename(columns={incoming_name: col}, inplace=True)
 
     # Remove any stray right-key column copy
-    if right_key in merged.columns and right_key != left_key:
-        merged.drop(columns=[right_key], inplace=True)
+    if incoming_right_key in merged.columns and incoming_right_key != left_key:
+        merged.drop(columns=[incoming_right_key], inplace=True)
 
     # Ensure all incoming-only columns exist even if the merge produced no _incoming column
     for col in incoming_cols:
         if col == geometry_name:
+            continue
+        if col in matched_incoming_columns:
             continue
         if col not in merged.columns:
             try:
@@ -1295,6 +1311,14 @@ def merge_without_duplicates(
             normalized_seen[norm] = col
     if columns_to_drop:
         merged.drop(columns=columns_to_drop, inplace=True, errors="ignore")
+
+    if norm_key in merged.columns:
+        merged.drop(columns=[norm_key], inplace=True, errors="ignore")
+
+    non_geometry_columns = [c for c in merged.columns if c != geometry_name]
+    if non_geometry_columns:
+        forward_fill_values = merged[non_geometry_columns].replace("", pd.NA).ffill()
+        merged[non_geometry_columns] = forward_fill_values
 
     for col in merged.columns:
         if col == geometry_name:
