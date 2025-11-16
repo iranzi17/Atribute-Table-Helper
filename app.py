@@ -15,6 +15,7 @@ import streamlit as st
 from openpyxl import load_workbook
 import json
 from io import StringIO
+import unicodedata
 
 
 REFERENCE_DATA_DIR = Path(__file__).parent / "reference_data"
@@ -176,11 +177,47 @@ COMPARISON_TRANSLATION_TABLE = str.maketrans("", "", COMPARISON_IGNORED_CHARS)
 MAX_GPKG_NAME_LENGTH = 254
 
 
+def remove_all_unicode_whitespace(text: str) -> str:
+    """
+    Remove ALL unicode space-separator characters, including:
+    - Narrow no-break space (U+202F)
+    - No-break space (U+00A0)
+    - Figure space (U+2007)
+    - Thin space (U+2009)
+    - Hair space (U+200A)
+    - Punctuation space, en-space, em-space, etc.
+    - ANY character whose Unicode category is 'Zs'
+
+    Excel exports often contain U+202F and U+00A0, which break header matching.
+    This function eliminates those characters safely.
+    """
+    if not isinstance(text, str):
+        return text
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Zs")
+
+
 def _clean_column_name(name: Any) -> str:
+    """
+    Clean column names for UI display and GPKG writing.
+    This patch improves cleaning by:
+    - Removing ALL forms of Unicode whitespace (Zs category)
+    - Removing zero-width and BOM characters
+    - Collapsing internal spacing
+    - Preserving punctuation (important!)
+    """
+
     text = "" if name is None else str(name)
+
+    # Remove ALL unicode whitespace separators (Excel often uses U+202F)
+    text = remove_all_unicode_whitespace(text)
+
+    # Remove invisible characters defined in INVISIBLE_HEADER_CHARS
     for ch in INVISIBLE_HEADER_CHARS:
         text = text.replace(ch, "")
+
+    # Collapse multiple visible spaces into a single one
     text = " ".join(text.split())
+
     return text.strip()
 
 
@@ -193,13 +230,35 @@ def _strip_comparison_punctuation(text: str) -> str:
 
 
 def normalize_for_compare(name: Any) -> str:
-    text = "" if name is None else str(name)
-    text = text.lower()
+    """
+    Normalize a column name for matching by removing:
+    - spaces
+    - underscores
+    - hyphens
+    - commas
+    - periods
+    - parentheses
+    - slashes
+    - invisible chars
+    - converting to lowercase
+    """
+
+    if name is None:
+        return ""
+
+    text = str(name).lower()
+
+    # remove invisible characters
     for ch in INVISIBLE_HEADER_CHARS:
         text = text.replace(ch, "")
+
+    # collapse whitespace
     text = " ".join(text.split())
-    for ch in (" ", "_", "-"):
-        text = text.replace(ch, "")
+
+    # remove punctuation and comparison noise
+    remove_chars = " -_,./()\\"
+    text = text.translate(str.maketrans("", "", remove_chars))
+
     return text.strip()
 
 
