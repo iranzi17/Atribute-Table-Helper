@@ -181,6 +181,16 @@ def _clean_column_name(name: Any) -> str:
     return text
 
 
+def normalize_for_compare(name: str) -> str:
+    return (
+        name.lower()
+        .replace(" ", "")
+        .replace("_", "")
+        .replace("-", "")
+        .strip()
+    )
+
+
 def _finalize_dataframe_columns(df: pd.DataFrame) -> pd.DataFrame:
     if not isinstance(df, pd.DataFrame):
         return df
@@ -1107,14 +1117,30 @@ def sanitize_gdf_for_gpkg(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     gdf_copy = gdf.copy()
     geometry_name = gdf_copy.geometry.name if hasattr(gdf_copy, "geometry") else None
 
-    used_names = {geometry_name: True} if geometry_name else {}
+    used_names = {}
+    normalized_used = {}
+
     new_columns = []
     for col in gdf_copy.columns:
         if col == geometry_name:
             new_columns.append(col)
             continue
-        sanitized = _truncate_column_name(_clean_column_name(col), used_names)
-        new_columns.append(sanitized)
+
+        clean = _clean_column_name(col)
+        normalized = normalize_for_compare(clean)
+
+        if normalized in normalized_used:
+            base = clean
+            counter = 1
+            candidate = f"{base}_{counter}"
+            while normalize_for_compare(candidate) in normalized_used:
+                counter += 1
+                candidate = f"{base}_{counter}"
+            clean = candidate
+
+        normalized_used[normalize_for_compare(clean)] = True
+        used_names[clean] = True
+        new_columns.append(clean)
     gdf_copy.columns = new_columns
 
     for col in gdf_copy.columns:
