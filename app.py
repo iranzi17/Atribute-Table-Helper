@@ -171,6 +171,8 @@ def _reset_stream(stream):
 
 
 INVISIBLE_HEADER_CHARS = ["\ufeff", "\u200b", "\u200c", "\u200d", "\ufeff", "\xa0"]
+COMPARISON_IGNORED_CHARS = " -_,./()\\"
+COMPARISON_TRANSLATION_TABLE = str.maketrans("", "", COMPARISON_IGNORED_CHARS)
 MAX_GPKG_NAME_LENGTH = 254
 
 
@@ -180,6 +182,14 @@ def _clean_column_name(name: Any) -> str:
         text = text.replace(ch, "")
     text = " ".join(text.split())
     return text.strip()
+
+
+def _strip_comparison_punctuation(text: str) -> str:
+    """Remove punctuation and spacing noise for comparison-only matching."""
+
+    if not text:
+        return ""
+    return text.translate(COMPARISON_TRANSLATION_TABLE)
 
 
 def normalize_for_compare(name: Any) -> str:
