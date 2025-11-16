@@ -1164,7 +1164,27 @@ def merge_without_duplicates(
 ) -> gpd.GeoDataFrame:
     """Join df onto gdf but avoid duplicate columns when names collide."""
     base_gdf = gdf.copy()
-    incoming_df = _finalize_dataframe_columns(df.copy())
+    incoming_df = df.copy()
+
+    # --- New normalization unification layer ---
+    # Build normalized lookup for GPKG columns
+    gpkg_norm = {
+        normalize_for_compare(col): col
+        for col in base_gdf.columns
+    }
+
+    # Prepare a renaming map for df
+    rename_map = {}
+    for col in incoming_df.columns:
+        norm = normalize_for_compare(col)
+        if norm in gpkg_norm:
+            rename_map[col] = gpkg_norm[norm]
+
+    # Apply the renaming
+    if rename_map:
+        incoming_df = incoming_df.rename(columns=rename_map)
+
+    incoming_df = _finalize_dataframe_columns(incoming_df)
 
     merged = base_gdf.merge(
         incoming_df,
