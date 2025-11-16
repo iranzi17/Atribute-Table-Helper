@@ -193,13 +193,35 @@ def _strip_comparison_punctuation(text: str) -> str:
 
 
 def normalize_for_compare(name: Any) -> str:
-    text = "" if name is None else str(name)
-    text = text.lower()
+    """
+    Normalize a column name for matching by removing:
+    - spaces
+    - underscores
+    - hyphens
+    - commas
+    - periods
+    - parentheses
+    - slashes
+    - invisible chars
+    - converting to lowercase
+    """
+
+    if name is None:
+        return ""
+
+    text = str(name).lower()
+
+    # remove invisible characters
     for ch in INVISIBLE_HEADER_CHARS:
         text = text.replace(ch, "")
+
+    # collapse whitespace
     text = " ".join(text.split())
-    for ch in (" ", "_", "-"):
-        text = text.replace(ch, "")
+
+    # remove punctuation and comparison noise
+    remove_chars = " -_,./()\\"
+    text = text.translate(str.maketrans("", "", remove_chars))
+
     return text.strip()
 
 
