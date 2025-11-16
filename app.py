@@ -183,10 +183,14 @@ def _clean_column_name(name: Any) -> str:
 
 def normalize_for_compare(name: str) -> str:
     return (
-        name.lower()
+        str(name)
+        .lower()
         .replace(" ", "")
         .replace("_", "")
         .replace("-", "")
+        .replace("(", "")
+        .replace(")", "")
+        .replace("/", "")
         .strip()
     )
 
@@ -195,6 +199,14 @@ def _finalize_dataframe_columns(df: pd.DataFrame) -> pd.DataFrame:
     if not isinstance(df, pd.DataFrame):
         return df
     df.columns = [_clean_column_name(col) for col in df.columns]
+    return df
+
+
+def _apply_global_forward_fill(df: pd.DataFrame) -> pd.DataFrame:
+    """Replace empty strings with NA and forward-fill the entire DataFrame."""
+    if isinstance(df, pd.DataFrame):
+        df = df.replace("", pd.NA)
+        df = df.ffill()
     return df
 
 
@@ -298,6 +310,7 @@ def parse_pasted_tabular_text(text: str) -> pd.DataFrame:
         keep_default_na=False,
         na_filter=False,
     )
+    df = _apply_global_forward_fill(df)
     return _finalize_dataframe_columns(df)
 
 
@@ -328,6 +341,7 @@ def read_tabular_data(source):
             _reset_stream(source)
             try:
                 df = pd.read_csv(source, encoding=encoding, **csv_kwargs)
+                df = _apply_global_forward_fill(df)
                 return _finalize_dataframe_columns(df)
             except UnicodeDecodeError:
                 continue
@@ -340,6 +354,7 @@ def read_tabular_data(source):
             errors="replace",
             **csv_kwargs,
         )
+        df = _apply_global_forward_fill(df)
         return _finalize_dataframe_columns(df)
 
     if suffix in {".xlsx", ".xlsm", ".xls"}:
@@ -350,6 +365,7 @@ def read_tabular_data(source):
             na_filter=False,
             keep_default_na=False,
         )
+        df = _apply_global_forward_fill(df)
         return _finalize_dataframe_columns(df)
 
     raise ValueError(f"Unsupported file type: {suffix}")
@@ -366,6 +382,7 @@ def clean_empty_rows(df: pd.DataFrame) -> pd.DataFrame:
         mask = df.applymap(_is_effectively_empty)
         cleaned = df.loc[~mask.all(axis=1)].copy()
         cleaned.columns = list(df.columns)
+        cleaned = _apply_global_forward_fill(cleaned)
         return cleaned
     except Exception:
         return df
@@ -430,6 +447,7 @@ def load_reference_preview(workbook_path: Path, sheet_name: str, max_rows: int =
             sheet_name=sheet_name,
             nrows=max_rows,
         )
+        preview = _apply_global_forward_fill(preview)
         return preview
     except Exception:
         return pd.DataFrame()
@@ -1303,6 +1321,7 @@ if gpkg_file and data_ready:
         st.success("Data Loaded ✔")
     elif reference_path and reference_sheet:
         df = pd.read_excel(reference_path, sheet_name=reference_sheet)
+        df = _apply_global_forward_fill(df)
         df = clean_empty_rows(df)
         st.success(
             f"Reference workbook loaded ✔ ({workbook_label} • sheet: {reference_sheet})"
