@@ -1200,7 +1200,10 @@ def merge_without_duplicates(
     incoming_df = df.copy()
 
     # Normalize incoming columns to match existing GeoPackage columns
-    gpkg_norm = {normalize_for_compare(col): col for col in base_gdf.columns}
+    gpkg_norm = {
+        normalize_for_compare(col): col
+        for col in base_gdf.columns
+    }
 
     rename_map: dict[str, str] = {}
     for col in incoming_df.columns:
@@ -1232,7 +1235,7 @@ def merge_without_duplicates(
     )
 
     geometry_name = base_gdf.geometry.name if hasattr(base_gdf, "geometry") else None
-    incoming_cols = [c for c in incoming_df.columns if c not in {right_key, norm_key}]
+    incoming_cols = [c for c in incoming_df.columns if c != right_key]
 
     for col in incoming_cols:
         incoming_name = f"{col}_incoming"
@@ -1278,10 +1281,6 @@ def merge_without_duplicates(
     incoming_suffix_cols = [c for c in merged.columns if c.endswith("_incoming")]
     if incoming_suffix_cols:
         merged.drop(columns=incoming_suffix_cols, inplace=True, errors="ignore")
-
-    # Drop the normalized join key helper column
-    if norm_key in merged.columns:
-        merged.drop(columns=[norm_key], inplace=True, errors="ignore")
 
     # Ensure no duplicate or near-duplicate columns remain
     normalized_seen = {}
