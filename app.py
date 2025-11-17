@@ -3,6 +3,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 import base64
+import shutil
 from datetime import datetime, time, timedelta
 import hashlib
 import html
