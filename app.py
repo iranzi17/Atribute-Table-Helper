@@ -16,6 +16,7 @@ from openpyxl import load_workbook
 import json
 from io import StringIO
 import unicodedata
+import fiona
 
 
 REFERENCE_DATA_DIR = Path(__file__).parent / "reference_data"
@@ -335,6 +336,23 @@ def _stringify_value(value: Any) -> Any:
     if isinstance(value, (datetime, timedelta)):
         return value.isoformat()
     return str(value)
+
+
+def derive_layer_name_from_filename(file_name: str) -> str:
+    """Return a GeoPackage-safe layer name derived from an uploaded filename."""
+    try:
+        stem = Path(file_name).stem
+    except Exception:
+        stem = ""
+
+    cleaned = stem.strip()
+    if not cleaned:
+        cleaned = "layer"
+
+    if len(cleaned) > MAX_GPKG_NAME_LENGTH:
+        cleaned = cleaned[:MAX_GPKG_NAME_LENGTH]
+
+    return cleaned
 
 
 def ensure_valid_gpkg_dtypes(series: pd.Series) -> pd.Series:
@@ -1550,12 +1568,19 @@ with st.container():
             st.markdown(f"**Processing:** {polygon_conversion_file.name}")
             conversion_gdf = None
             temp_input_path = None
+            source_layer_name = None
             try:
                 with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp_in:
                     tmp_in.write(polygon_conversion_file.getbuffer())
                     temp_input_path = tmp_in.name
 
                 conversion_gdf = gpd.read_file(temp_input_path)
+                try:
+                    layers = fiona.listlayers(temp_input_path)
+                    if layers:
+                        source_layer_name = layers[0]
+                except Exception:
+                    source_layer_name = None
                 st.success(
                     f"Loaded GeoPackage with {len(conversion_gdf):,} feature(s) ready for conversion."
                 )
@@ -1578,11 +1603,52 @@ with st.container():
                 "polygon" in str(geom_type).lower()
                 for geom_type in geom_types_raw
             )
+            has_point_geometry = any(
+                "point" in str(geom_type).lower()
+                for geom_type in geom_types_raw
+            )
+
+            target_layer_name = derive_layer_name_from_filename(
+                polygon_conversion_file.name
+            )
 
             if not has_polygon_geometry:
-                st.info(
-                    "This GeoPackage does not contain Polygon or MultiPolygon geometries, so no centroid conversion was performed."
-                )
+                if (
+                    has_point_geometry
+                    and source_layer_name
+                    and source_layer_name != target_layer_name
+                ):
+                    st.info(
+                        "No polygons detected, but updating the layer name to match the GeoPackage filename."
+                    )
+                    temp_output_path = None
+                    try:
+                        safe_copy = sanitize_gdf_for_gpkg(conversion_gdf)
+                        with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp_out:
+                            temp_output_path = tmp_out.name
+                        safe_copy.to_file(
+                            temp_output_path,
+                            driver="GPKG",
+                            layer=target_layer_name,
+                        )
+                        with open(temp_output_path, "rb") as converted:
+                            converted_packages.append(
+                                (polygon_conversion_file.name, converted.read())
+                            )
+                        st.success(
+                            f"Layer renamed to '{target_layer_name}' for {polygon_conversion_file.name}."
+                        )
+                    except Exception as exc:
+                        st.error(
+                            f"Failed to update layer name for {polygon_conversion_file.name}: {exc}"
+                        )
+                    finally:
+                        if temp_output_path and os.path.exists(temp_output_path):
+                            os.remove(temp_output_path)
+                else:
+                    st.info(
+                        "This GeoPackage does not contain Polygon or MultiPolygon geometries, so no centroid conversion was performed."
+                    )
                 continue
 
             try:
@@ -1596,11 +1662,10 @@ with st.container():
                 try:
                     with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp_out:
                         temp_output_path = tmp_out.name
-                    # Keep internal layer name simple; file name will be original name
                     safe_points.to_file(
                         temp_output_path,
                         driver="GPKG",
-                        layer="centroid_points",
+                        layer=target_layer_name,
                     )
                     with open(temp_output_path, "rb") as converted:
                         converted_packages.append(
