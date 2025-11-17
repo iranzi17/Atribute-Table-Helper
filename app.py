@@ -3,6 +3,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 import base64
+import shutil
 from datetime import datetime, time, timedelta
 import hashlib
 import html
@@ -17,6 +18,10 @@ import json
 from io import StringIO
 import unicodedata
 import fiona
+from fiona.drvsupport import supported_drivers
+
+supported_drivers["FileGDB"] = "rw"
+supported_drivers["OpenFileGDB"] = "r"
 
 
 REFERENCE_DATA_DIR = Path(__file__).parent / "reference_data"
@@ -1828,6 +1833,110 @@ with st.container():
                             os.remove(temp_path)
                 except Exception as exc:
                     st.error(f"Failed to merge dataset {dataset['base']}: {exc}")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with st.container():
+    st.markdown('<div class="section-box tertiary">', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-title">GeoPackage → File Geodatabase Conversion</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<p class='section-subtext'>Translate GeoPackage datasets into ESRI File Geodatabases "
+        "while preserving feature geometry, CRS definitions, and attribute schema.</p>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "Upload one or more GeoPackages to create engineering-grade File Geodatabase "
+        "deliverables. Each layer name is aligned with the source filename, and the "
+        "resulting .gdb folders are zipped for streamlined distribution.",
+    )
+
+    gpkg_conversion_files = st.file_uploader(
+        "Upload GeoPackage datasets for File Geodatabase export",
+        type=["gpkg"],
+        accept_multiple_files=True,
+    )
+
+    converted_gdb_archives = []
+    if not gpkg_conversion_files:
+        st.info("Provide at least one GeoPackage to begin the conversion workflow.")
+    else:
+        for gpkg_file in gpkg_conversion_files:
+            base_name = Path(gpkg_file.name).stem
+            layer_name = base_name.replace(" ", "_")
+            temp_gdb_root = tempfile.mkdtemp()
+            gdb_directory = os.path.join(temp_gdb_root, f"{layer_name}.gdb")
+            try:
+                _reset_stream(gpkg_file)
+                source_gdf = gpd.read_file(gpkg_file)
+                safe_gdf = sanitize_gdf_for_gpkg(source_gdf)
+                safe_gdf.to_file(gdb_directory, driver="FileGDB", layer=layer_name)
+
+                archive_base = os.path.join(temp_gdb_root, f"{layer_name}.gdb")
+                archive_path = shutil.make_archive(
+                    archive_base,
+                    "zip",
+                    root_dir=temp_gdb_root,
+                    base_dir=f"{layer_name}.gdb",
+                )
+                with open(archive_path, "rb") as archive_fh:
+                    archive_bytes = archive_fh.read()
+
+                converted_gdb_archives.append(
+                    {
+                        "file_name": f"{layer_name}.gdb.zip",
+                        "data": archive_bytes,
+                    }
+                )
+
+                feature_count = len(safe_gdf)
+                crs_text = safe_gdf.crs.to_string() if safe_gdf.crs else "Unspecified CRS"
+                st.success(
+                    f"{gpkg_file.name} converted to File Geodatabase dataset '{layer_name}' "
+                    f"({feature_count} spatial features, CRS: {crs_text})."
+                )
+                st.download_button(
+                    f"⬇ Download {layer_name}.gdb.zip",
+                    data=archive_bytes,
+                    file_name=f"{layer_name}.gdb.zip",
+                    mime="application/zip",
+                    key=f"download_gdb_{gpkg_file.name}",
+                )
+            except Exception as exc:
+                st.error(f"Failed to convert {gpkg_file.name}: {exc}")
+            finally:
+                shutil.rmtree(temp_gdb_root, ignore_errors=True)
+
+    if converted_gdb_archives:
+        st.success(
+            f"Prepared {len(converted_gdb_archives)} File Geodatabase package(s) ready for delivery."
+        )
+        combined_zip_bytes = None
+        combined_zip_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_bundle:
+                combined_zip_path = tmp_bundle.name
+            with zipfile.ZipFile(
+                combined_zip_path, "w", compression=zipfile.ZIP_DEFLATED
+            ) as bundle_zip:
+                for archive in converted_gdb_archives:
+                    bundle_zip.writestr(archive["file_name"], archive["data"])
+            with open(combined_zip_path, "rb") as bundle_file:
+                combined_zip_bytes = bundle_file.read()
+        except Exception as exc:
+            st.error(f"Failed to assemble the combined File Geodatabase ZIP: {exc}")
+        finally:
+            if combined_zip_path and os.path.exists(combined_zip_path):
+                os.remove(combined_zip_path)
+
+        if combined_zip_bytes:
+            st.download_button(
+                "⬇ Download all File Geodatabases (ZIP)",
+                data=combined_zip_bytes,
+                file_name="file_geodatabases.zip",
+                mime="application/zip",
+            )
     st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown(
