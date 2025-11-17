@@ -179,21 +179,34 @@ MAX_GPKG_NAME_LENGTH = 254
 
 def remove_all_unicode_whitespace(text: str) -> str:
     """
-    Remove ALL unicode space-separator characters, including:
-    - Narrow no-break space (U+202F)
-    - No-break space (U+00A0)
-    - Figure space (U+2007)
-    - Thin space (U+2009)
-    - Hair space (U+200A)
-    - Punctuation space, en-space, em-space, etc.
-    - ANY character whose Unicode category is 'Zs'
+    Remove ONLY non-standard Unicode space-separator characters while
+    preserving normal ASCII spaces in the visible text.
 
-    Excel exports often contain U+202F and U+00A0, which break header matching.
-    This function eliminates those characters safely.
+    - We still strip Excel artifacts such as:
+        U+202F (NARROW NO-BREAK SPACE)
+        U+00A0 (NO-BREAK SPACE)  [also handled via INVISIBLE_HEADER_CHARS]
+        U+2007, U+2009, U+200A, etc.
+    - But we KEEP the regular space character U+0020 so headers look normal.
+
+    This function is safe to use in _clean_column_name() and keeps headers
+    readable like:
+        "Current Carrying Capacity in Air - Continuous Load (A)"
+    instead of:
+        "CurrentCarryingCapacityinAir-ContinuousLoad(A)"
     """
     if not isinstance(text, str):
         return text
-    return "".join(ch for ch in text if unicodedata.category(ch) != "Zs")
+
+    cleaned_chars = []
+    for ch in text:
+        cat = unicodedata.category(ch)
+        # Category "Zs" = space separators; we only strip the exotic ones.
+        if cat == "Zs" and ch != " ":
+            # Drop narrow NBSP, NBSP, thin space, etc.
+            continue
+        cleaned_chars.append(ch)
+
+    return "".join(cleaned_chars)
 
 
 def _clean_column_name(name: Any) -> str:
