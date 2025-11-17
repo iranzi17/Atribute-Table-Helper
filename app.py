@@ -193,17 +193,7 @@ def remove_all_unicode_whitespace(text: str) -> str:
     """
     if not isinstance(text, str):
         return text
-
-    cleaned_chars = []
-    for ch in text:
-        cat = unicodedata.category(ch)
-        # Category "Zs" = space separators; we only strip the exotic ones.
-        if cat == "Zs" and ch != " ":
-            # Drop narrow NBSP, NBSP, thin space, etc.
-            continue
-        cleaned_chars.append(ch)
-
-    return "".join(cleaned_chars)
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Zs")
 
 
 def _clean_column_name(name: Any) -> str:
