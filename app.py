@@ -1222,23 +1222,29 @@ with st.container():
         "<p class='section-subtext'>Customize how the updated GeoPackage will be saved. The same name is used for the output layer.</p>",
         unsafe_allow_html=True,
     )
+    # --- PATCH: Auto-fill output name from uploaded GPKG ---
+
     equipment_type = None
-    if workbook_label:
-        equipment_type = workbook_label
-    elif uploaded_data_file is not None:
+
+    # If GPKG uploaded → use its filename (without extension)
+    if gpkg_file is not None:
         try:
-            equipment_type = Path(uploaded_data_file.name).stem
+            gpkg_stem = Path(gpkg_file.name).stem
+            equipment_type = gpkg_stem
         except Exception:
-            equipment_type = None
+            gpkg_stem = "updated_clean"
+    else:
+        gpkg_stem = "updated_clean"
 
-    auto_name = "updated_clean"
-    suggested_name = name_memory.get(equipment_type, auto_name) if equipment_type else auto_name
+    # Load from memory if exists, otherwise default to GPKG name
+    suggested_name = name_memory.get(equipment_type, gpkg_stem)
 
+    # Text input (editable by user)
     output_name = st.text_input(
         "Name for the updated GeoPackage (without extension)",
         value=suggested_name,
         help="This will also be used for the GeoPackage layer name.",
-    ).strip() or auto_name
+    ).strip() or gpkg_stem
     st.markdown('</div>', unsafe_allow_html=True)
 
 layer_name = output_name.replace(" ", "_")
