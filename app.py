@@ -1128,7 +1128,12 @@ with st.container():
         "<p class='section-subtext'>Upload your GeoPackage and select how attribute data should be provided.</p>",
         unsafe_allow_html=True,
     )
-    gpkg_file = st.file_uploader("Upload GeoPackage (.gpkg)", type=["gpkg"], key="single_gpkg")
+    gpkg_files = st.file_uploader(
+        "Upload GeoPackage (.gpkg)",
+        type=["gpkg"],
+        key="single_gpkg",
+        accept_multiple_files=True,
+    )
 
     data_source = st.radio(
         "Attribute data source",
@@ -1144,47 +1149,13 @@ with st.container():
     reference_sheet = None
     reference_path = None
     workbook_label = None
-    pasted_df = None
+    shared_df = None
+    shared_source_label = None
 
     if data_source == "Paste data directly":
-        with st.container():
-            st.markdown("##### Paste Your Tabular Data")
-            st.markdown(
-                "Paste raw tabular data (Ctrl+C from Excel → Ctrl+V here). The app will parse TSV/CSV, show it for editing, and use it for merging."
-            )
-            paste_text = st.text_area(
-                "Paste your data here (TSV/CSV format)",
-                height=150,
-                placeholder="Paste tabular data here...",
-                key="paste_text_direct",
-            )
-
-            if isinstance(paste_text, str) and paste_text.strip():
-                parsed = None
-                try:
-                    parsed = parse_pasted_tabular_text(paste_text)
-                except Exception:
-                    parsed = None
-
-                if isinstance(parsed, pd.DataFrame):
-                    edited = st.data_editor(parsed, num_rows="dynamic", key="pasted_data_editor_direct")
-                    if isinstance(edited, pd.DataFrame) and not edited.dropna(how="all").empty:
-                        pasted_df = clean_empty_rows(edited)
-                        try:
-                            st.session_state["df_from_paste"] = pasted_df
-                        except Exception:
-                            pass
-                        st.success("Pasted data detected — it will be used for merging.")
-                else:
-                    st.warning(
-                        "Unable to parse pasted text as a table. Please ensure it's tabular (TSV/CSV) or paste directly from Excel cells."
-                    )
-            if not paste_text or not str(paste_text).strip():
-                if "df_from_paste" in st.session_state:
-                    try:
-                        del st.session_state["df_from_paste"]
-                    except Exception:
-                        pass
+        st.info(
+            "Paste raw tabular data inside each GeoPackage block below. Each dataset has its own paste area and editable preview."
+        )
 
     if data_source == "Upload CSV/Excel file":
         uploaded_data_file = st.file_uploader(
@@ -1192,7 +1163,15 @@ with st.container():
             type=["csv", "xlsx"],
             key="data_file_uploader",
         )
-    else:
+        if uploaded_data_file is not None:
+            try:
+                shared_df = read_tabular_data(uploaded_data_file)
+                shared_df = clean_empty_rows(shared_df)
+                shared_source_label = uploaded_data_file.name
+                st.success("Data Loaded ✔")
+            except Exception as exc:
+                st.error(f"Unable to read uploaded data file: {exc}")
+    elif data_source == "Use stored reference workbook":
         if not reference_workbooks:
             st.info(
                 "No reference workbooks found in `reference_data`. Add an Excel file to that folder to use this option."
@@ -1211,6 +1190,17 @@ with st.container():
                     sheet_names,
                     key="reference_sheet_select",
                 )
+                if reference_path and reference_sheet:
+                    try:
+                        shared_df = pd.read_excel(reference_path, sheet_name=reference_sheet)
+                        shared_df = _apply_global_forward_fill(shared_df)
+                        shared_df = clean_empty_rows(shared_df)
+                        shared_source_label = f"{workbook_label} • sheet: {reference_sheet}"
+                        st.success(
+                            f"Reference workbook loaded ✔ ({workbook_label} • sheet: {reference_sheet})"
+                        )
+                    except Exception as exc:
+                        st.error(f"Unable to read selected workbook: {exc}")
             else:
                 st.warning("Unable to read sheet names from the selected workbook.")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -1222,32 +1212,11 @@ with st.container():
         "<p class='section-subtext'>Customize how the updated GeoPackage will be saved. The same name is used for the output layer.</p>",
         unsafe_allow_html=True,
     )
-    # --- PATCH: Auto-fill output name from uploaded GPKG ---
-
-    equipment_type = None
-
-    # If GPKG uploaded → use its filename (without extension)
-    if gpkg_file is not None:
-        try:
-            gpkg_stem = Path(gpkg_file.name).stem
-            equipment_type = gpkg_stem
-        except Exception:
-            gpkg_stem = "updated_clean"
-    else:
-        gpkg_stem = "updated_clean"
-
-    # Load from memory if exists, otherwise default to GPKG name
-    suggested_name = name_memory.get(equipment_type, gpkg_stem)
-
-    # Text input (editable by user)
-    output_name = st.text_input(
-        "Name for the updated GeoPackage (without extension)",
-        value=suggested_name,
-        help="This will also be used for the GeoPackage layer name.",
-    ).strip() or gpkg_stem
+    st.markdown(
+        "<p>Each uploaded GeoPackage now has its own naming input, paste block, and merge controls in the sections below.</p>",
+        unsafe_allow_html=True,
+    )
     st.markdown('</div>', unsafe_allow_html=True)
-
-layer_name = output_name.replace(" ", "_")
 
 
 def sanitize_gdf_for_gpkg(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -1486,72 +1455,156 @@ def read_pairs_from_zip(uploaded_zip):
     return dataset_pairs
 
 
-data_ready = uploaded_data_file is not None or (
-    reference_path is not None and reference_sheet is not None
-)
+if not gpkg_files:
+    st.info("Upload at least one GeoPackage to begin merging.")
+else:
+    for gpkg_file in gpkg_files:
+        gpkg_id = Path(gpkg_file.name).stem or "dataset"
+        paste_df_key = f"df_from_paste_{gpkg_id}"
+        st.markdown(f"<h4>{html.escape(gpkg_file.name)}</h4>", unsafe_allow_html=True)
 
-if gpkg_file and data_ready:
-    gdf = gpd.read_file(gpkg_file)
-    st.success("GeoPackage Loaded ✔")
-
-    df_from_paste = st.session_state.get("df_from_paste")
-    if isinstance(df_from_paste, pd.DataFrame) and not df_from_paste.dropna(how="all").empty:
-        df = df_from_paste
-        st.success("Using pasted data ✔")
-    elif uploaded_data_file is not None:
+        _reset_stream(gpkg_file)
         try:
-            df = read_tabular_data(uploaded_data_file)
-            df = clean_empty_rows(df)
+            gdf = gpd.read_file(gpkg_file)
         except Exception as exc:
-            st.error(f"Unable to read uploaded data file: {exc}")
-            st.stop()
-        st.success("Data Loaded ✔")
-    elif reference_path and reference_sheet:
-        df = pd.read_excel(reference_path, sheet_name=reference_sheet)
-        df = _apply_global_forward_fill(df)
-        df = clean_empty_rows(df)
-        st.success(
-            f"Reference workbook loaded ✔ ({workbook_label} • sheet: {reference_sheet})"
+            st.error(f"Unable to read {gpkg_file.name}: {exc}")
+            continue
+
+        st.caption(f"Loaded {len(gdf):,} feature(s)")
+        st.dataframe(gdf.head(PREVIEW_ROW_COUNT))
+
+        st.markdown("**Pasted Data Input**")
+        paste_text = st.text_area(
+            f"Paste data for {gpkg_file.name}",
+            height=150,
+            placeholder="Paste tabular data for this GeoPackage...",
+            key=f"paste_{gpkg_id}",
         )
 
-    st.markdown('<div class="section-title">Select join fields</div>', unsafe_allow_html=True)
-    left_key = st.selectbox("Field in GeoPackage", gdf.columns)
-    right_key = st.selectbox("Field in Data File", df.columns)
+        if isinstance(paste_text, str) and paste_text.strip():
+            parsed = None
+            try:
+                parsed = parse_pasted_tabular_text(paste_text)
+            except Exception:
+                parsed = None
 
-    if st.button("Merge Without Duplicates"):
-        try:
-            merged_gdf = merge_without_duplicates(gdf, df, left_key, right_key)
-            st.success("Attributes Merged Successfully ✔")
-            st.dataframe(merged_gdf.head())
+            if isinstance(parsed, pd.DataFrame):
+                edited = st.data_editor(
+                    parsed,
+                    num_rows="dynamic",
+                    key=f"pasted_data_editor_{gpkg_id}",
+                )
+                if isinstance(edited, pd.DataFrame):
+                    cleaned = clean_empty_rows(edited)
+                    if not cleaned.dropna(how="all").empty:
+                        st.session_state[paste_df_key] = cleaned
+                        st.success("Pasted data parsed successfully ✔")
+                    else:
+                        st.warning("Pasted data appears empty after cleaning.")
+            else:
+                st.warning(
+                    "Unable to parse pasted text as a table. Please ensure it's tabular (TSV/CSV) or paste directly from Excel cells."
+                )
+        else:
+            if paste_df_key in st.session_state:
+                del st.session_state[paste_df_key]
 
-            with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp:
-                temp_path = tmp.name
+        pasted_df = st.session_state.get(paste_df_key)
+        df_for_merge = None
+        df_source_description = None
+        if isinstance(pasted_df, pd.DataFrame) and not pasted_df.dropna(how="all").empty:
+            df_for_merge = pasted_df
+            df_source_description = "Pasted data"
+        elif shared_df is not None:
+            df_for_merge = shared_df
+            df_source_description = shared_source_label or "Uploaded tabular data"
+
+        st.markdown("**Tabular Data Preview**")
+        if df_for_merge is not None:
+            if df_source_description:
+                st.caption(f"Source: {df_source_description}")
+            st.dataframe(df_for_merge.head(PREVIEW_ROW_COUNT))
+        else:
+            st.warning(
+                "No tabular data detected for this GeoPackage. Paste data above or provide a CSV/Excel/reference workbook."
+            )
+
+        left_key = None
+        right_key = None
+        if df_for_merge is not None:
+            st.markdown('<div class="section-title">Select join fields</div>', unsafe_allow_html=True)
+            left_key = st.selectbox(
+                "Field in GeoPackage",
+                gdf.columns,
+                key=f"left_key_{gpkg_id}",
+            )
+            right_key = st.selectbox(
+                "Field in Data File",
+                df_for_merge.columns,
+                key=f"right_key_{gpkg_id}",
+            )
+
+        auto_name = gpkg_id or "updated_clean"
+        suggested_name = name_memory.get(auto_name, auto_name)
+        output_name = (
+            st.text_input(
+                "Name for the updated GeoPackage (without extension)",
+                value=suggested_name,
+                key=f"output_name_{gpkg_id}",
+                help="This will also be used for the GeoPackage layer name.",
+            ).strip()
+            or auto_name
+        )
+        layer_name = output_name.replace(" ", "_")
+
+        if st.button(f"Merge This GPKG ({gpkg_file.name})", key=f"merge_btn_{gpkg_id}"):
+            if df_for_merge is None:
+                st.warning(
+                    f"{gpkg_file.name}: Provide pasted data or load a CSV/Excel/reference workbook before merging."
+                )
+                continue
+            if not left_key or not right_key:
+                st.warning(f"{gpkg_file.name}: Please select both join fields.")
+                continue
 
             try:
-                safe_gdf = sanitize_gdf_for_gpkg(merged_gdf)
+                df_to_merge = df_for_merge.copy() if hasattr(df_for_merge, "copy") else df_for_merge
+            except Exception:
+                df_to_merge = df_for_merge
+
+            try:
+                merged_gdf = merge_without_duplicates(gdf.copy(), df_to_merge, left_key, right_key)
+                st.success(f"Attributes merged for {gpkg_file.name} ✔")
+                st.dataframe(merged_gdf.head())
+
+                with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp:
+                    temp_path = tmp.name
+
                 try:
-                    if equipment_type:
-                        existing = name_memory.get(equipment_type)
+                    safe_gdf = sanitize_gdf_for_gpkg(merged_gdf)
+                    try:
+                        existing = name_memory.get(auto_name)
                         if output_name and output_name != existing and output_name != auto_name:
-                            set_saved_name(equipment_type, output_name, name_memory)
-                except Exception:
-                    pass
+                            set_saved_name(auto_name, output_name, name_memory)
+                    except Exception:
+                        pass
 
-                safe_gdf.to_file(temp_path, driver="GPKG", layer=layer_name)
-                with open(temp_path, "rb") as updated:
-                    data_bytes = updated.read()
+                    safe_gdf.to_file(temp_path, driver="GPKG", layer=layer_name)
+                    with open(temp_path, "rb") as updated:
+                        data_bytes = updated.read()
 
-                st.download_button(
-                    "⬇ Download Updated GeoPackage",
-                    data=data_bytes,
-                    file_name=f"{output_name}.gpkg",
-                    mime="application/geopackage+sqlite3",
-                )
-            finally:
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-        except Exception as exc:
-            st.error(f"Error while merging: {exc}")
+                    st.download_button(
+                        f"⬇ Download {output_name}.gpkg",
+                        data=data_bytes,
+                        file_name=f"{output_name}.gpkg",
+                        mime="application/geopackage+sqlite3",
+                        key=f"download_{gpkg_id}",
+                    )
+                finally:
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+            except Exception as exc:
+                st.error(f"Error while merging {gpkg_file.name}: {exc}")
 
 # ------------------- GEOMETRY CONVERSION (POLYGON → POINT) -----------------
 with st.container():
