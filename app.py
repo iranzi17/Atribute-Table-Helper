@@ -17,12 +17,21 @@ from openpyxl import load_workbook
 import json
 from io import StringIO
 import unicodedata
-import fiona
-from fiona.drvsupport import supported_drivers
+import pyogrio
 
-supported_drivers["FileGDB"] = "rw"
-supported_drivers["OpenFileGDB"] = "r"
+# Prefer GDAL-backed pyogrio engine to avoid requiring fiona wheels in hosted environments
+gpd.options.io_engine = "pyogrio"
 
+# Optional fiona: use if available for extra drivers (e.g., FileGDB), but do not require it
+try:
+    import fiona
+    from fiona.drvsupport import supported_drivers
+
+    supported_drivers["FileGDB"] = "rw"
+    supported_drivers["OpenFileGDB"] = "r"
+    HAS_FIONA = True
+except Exception:
+    HAS_FIONA = False
 
 REFERENCE_DATA_DIR = Path(__file__).parent / "reference_data"
 HERO_IMAGE_PATH = Path(__file__).parent / "rwanda_small_map.jpg"
@@ -546,7 +555,7 @@ def clean_empty_rows(df: pd.DataFrame) -> pd.DataFrame:
         if df.empty:
             return df
 
-        mask = df.applymap(_is_effectively_empty)
+        mask = df.apply(lambda col: col.map(_is_effectively_empty))
         cleaned = df.loc[~mask.all(axis=1)].copy()
         cleaned.columns = list(df.columns)
         cleaned = _apply_global_forward_fill(cleaned)
@@ -1708,9 +1717,15 @@ with st.container():
 
                 conversion_gdf = gpd.read_file(temp_input_path)
                 try:
-                    layers = fiona.listlayers(temp_input_path)
-                    if layers:
-                        source_layer_name = layers[0]
+                    layer_info = pyogrio.list_layers(temp_input_path)
+                    if hasattr(layer_info, "__iter__"):
+                        # DataFrame-like; prefer name column
+                        if hasattr(layer_info, "name"):
+                            names = list(layer_info["name"])
+                        else:
+                            names = [li[0] for li in layer_info] if layer_info else []
+                        if names:
+                            source_layer_name = names[0]
                 except Exception:
                     source_layer_name = None
                 st.success(

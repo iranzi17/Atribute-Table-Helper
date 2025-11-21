@@ -29,7 +29,7 @@ streamlit run app.py
 ### System requirements
 
 - GDAL/PROJ binaries that match the pinned Python wheels (for Fiona/pyogrio/GeoPandas).
-- FileGDB driver support if you plan to export to ESRI File Geodatabases (install the ESRI FileGDB SDK and ensure GDAL sees the plugin).
+- FileGDB driver support if you plan to export to ESRI File Geodatabases (install the ESRI FileGDB SDK and ensure GDAL sees the plugin). This is typically unavailable on Streamlit Cloud; use a local environment if you need FileGDB output.
 
 ### Need a sample workbook without committing binaries?
 
