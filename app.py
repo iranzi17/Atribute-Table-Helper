@@ -50,7 +50,7 @@ def load_name_memory() -> dict:
             with open(NAME_MEMORY_PATH, "r", encoding="utf-8") as fh:
                 return json.load(fh)
     except Exception:
-        # Corrupt or unreadable file — ignore and start fresh
+        # Corrupt or unreadable file - ignore and start fresh
         return {}
     return {}
 
@@ -297,6 +297,24 @@ def normalize_value_for_compare(value: Any) -> str:
     return text
 
 
+def detect_normalized_collisions(series: pd.Series) -> dict[str, set[str]]:
+    """
+    Return mapping of normalized value -> set of distinct raw values when
+    multiple different raw values collapse to the same normalized key.
+    """
+    collisions: dict[str, set[str]] = {}
+    try:
+        for value in series.dropna():
+            normalized = normalize_value_for_compare(value)
+            if not normalized:
+                continue
+            bucket = collisions.setdefault(normalized, set())
+            bucket.add(str(value))
+        return {norm: raw_vals for norm, raw_vals in collisions.items() if len(raw_vals) > 1}
+    except Exception:
+        return {}
+
+
 def _finalize_dataframe_columns(df: pd.DataFrame) -> pd.DataFrame:
     if not isinstance(df, pd.DataFrame):
         return df
@@ -370,7 +388,7 @@ def ensure_valid_gpkg_dtypes(series: pd.Series) -> pd.Series:
     if pd.api.types.is_datetime64tz_dtype(result):
         result = result.dt.tz_localize(None)
     elif pd.api.types.is_datetime64_any_dtype(result):
-        # Already naive datetime — leave as-is
+        # Already naive datetime - leave as-is
         pass
     elif pd.api.types.is_timedelta64_dtype(result):
         result = result.astype(str)
@@ -445,7 +463,7 @@ def read_tabular_data(source):
     else:
         suffix = Path(source.name).suffix.lower()
 
-    # Common CSV options – autodetect separator via sep=None with python engine
+    # Common CSV options - autodetect separator via sep=None with python engine
     csv_kwargs = {
         "dtype": str,
         "keep_default_na": False,
@@ -488,6 +506,36 @@ def read_tabular_data(source):
         return _finalize_dataframe_columns(df)
 
     raise ValueError(f"Unsupported file type: {suffix}")
+
+
+def _safe_extract_zip(zip_file: zipfile.ZipFile, dest_dir: str):
+    """
+    Safely extract a ZIP file, rejecting absolute paths and traversal attempts.
+    Returns a list of extracted file paths.
+    """
+    dest_path = Path(dest_dir).resolve()
+    extracted = []
+
+    for member in zip_file.infolist():
+        member_path = Path(member.filename)
+
+        if member_path.is_absolute():
+            raise ValueError(f"Blocked absolute path in ZIP: {member.filename}")
+
+        resolved = (dest_path / member_path).resolve()
+        if dest_path not in resolved.parents and dest_path != resolved:
+            raise ValueError(f"Blocked path traversal in ZIP: {member.filename}")
+
+        if member.is_dir():
+            resolved.mkdir(parents=True, exist_ok=True)
+            continue
+
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        with zip_file.open(member, "r") as source, open(resolved, "wb") as target:
+            shutil.copyfileobj(source, target)
+        extracted.append(str(resolved))
+
+    return extracted
 
 
 def clean_empty_rows(df: pd.DataFrame) -> pd.DataFrame:
@@ -574,7 +622,7 @@ def load_reference_preview(workbook_path: Path, sheet_name: str, max_rows: int =
 
 st.set_page_config(
     page_title="Clean GPKG Attribute Filler",
-    page_icon="🗂️",
+    page_icon="gpkg",
     layout="wide",
 )
 
@@ -864,7 +912,7 @@ st.markdown(
     """
 <div class="hero-container">
     <div class="hero-left">
-        <h2>🌍 GeoData Fusion</h2>
+        <h2>GeoData Fusion</h2>
         <div class="tagline">
             <strong>Smart Attribute Mapping</strong><br>
             Harmonize GeoPackage data with precision
@@ -900,7 +948,7 @@ DEFAULT_QOTD_QUOTES = [
     {"text": "Scale models fade, but geospatial models evolve with every dataset.", "author": "Digital Twin Lab"},
     {"text": "Precision engineering is a love letter to the future.", "author": "Structures Atelier"},
     {"text": "Terrain is the silent stakeholder in every infrastructure project.", "author": "Hydrology Partners"},
-    {"text": "Buffer your assumptions like you buffer your geometries—generously.", "author": "Spatial Analyst Humor"},
+    {"text": "Buffer your assumptions like you buffer your geometries - generously.", "author": "Spatial Analyst Humor"},
     {"text": "Innovation happens where satellite imagery meets stubborn curiosity.", "author": "Orbital Cartography Group"},
     {"text": "The shortest path algorithms teach us: constraints reveal elegance.", "author": "Graph Theory Circle"},
     {"text": "Coordinate systems are the grammar of geographic storytelling.", "author": "Projection Society"},
@@ -912,7 +960,7 @@ DEFAULT_QOTD_QUOTES = [
     {"text": "Let data drive decisions, but let engineers drive the data.", "author": "Systems Integration Forum"},
     {"text": "Spatial joins turn isolated facts into operational knowledge.", "author": "GeoAnalytics Lab"},
     {"text": "A well-designed attribute table is as vital as a well-cured concrete pour.", "author": "Structural Data Guild"},
-    {"text": "Routing fiber or roads, the map cares not—only the engineer's intent matters.", "author": "Infrastructure Weavers"},
+    {"text": "Routing fiber or roads, the map cares not - only the engineer's intent matters.", "author": "Infrastructure Weavers"},
     {"text": "Use elevation to your advantage; gravity is the oldest project partner.", "author": "Hydraulic Insights"},
     {"text": "Reliable basemaps are quiet enablers of heroic field days.", "author": "Remote Sensing Crew"},
     {"text": "Quality control in GIS is the compass that keeps projects true north.", "author": "Survey Integrity Team"},
@@ -924,7 +972,7 @@ DEFAULT_QOTD_QUOTES = [
     {"text": "Survey stakes may move, but truth in data should not.", "author": "Field Integrity Corps"},
     {"text": "Engineers turn constraints into catalysts for excellence.", "author": "Design Performance Lab"},
     {"text": "Every raster pixel is a sensor whispering about the earth.", "author": "Imagery Insights"},
-    {"text": "Switchyards reward patience—the neatest diagrams prevent the loudest faults.", "author": "Substation Guild"},
+    {"text": "Switchyards reward patience - the neatest diagrams prevent the loudest faults.", "author": "Substation Guild"},
     {"text": "Model the future as carefully as you document the past.", "author": "Heritage Engineers"},
     {"text": "A tidy attribute table shortens site visits more than any shortcut road.", "author": "Logistics Cartographers"},
     {"text": "Precision thrives where curiosity meets calibration.", "author": "Metrology Circle"},
@@ -1008,8 +1056,8 @@ st.markdown(
 st.markdown(
     f"""
     <div class="qotd-box">
-        <div class="qotd-text">“{quote_text}”</div>
-        <div class="qotd-author">— {quote_author}</div>
+        <div class="qotd-text">"{quote_text}"</div>
+        <div class="qotd-author">- {quote_author}</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -1168,7 +1216,7 @@ with st.container():
                 shared_df = read_tabular_data(uploaded_data_file)
                 shared_df = clean_empty_rows(shared_df)
                 shared_source_label = uploaded_data_file.name
-                st.success("Data Loaded ✔")
+                st.success("Data loaded.")
             except Exception as exc:
                 st.error(f"Unable to read uploaded data file: {exc}")
     elif data_source == "Use stored reference workbook":
@@ -1195,9 +1243,9 @@ with st.container():
                         shared_df = pd.read_excel(reference_path, sheet_name=reference_sheet)
                         shared_df = _apply_global_forward_fill(shared_df)
                         shared_df = clean_empty_rows(shared_df)
-                        shared_source_label = f"{workbook_label} • sheet: {reference_sheet}"
+                        shared_source_label = f"{workbook_label} - sheet: {reference_sheet}"
                         st.success(
-                            f"Reference workbook loaded ✔ ({workbook_label} • sheet: {reference_sheet})"
+                            f"Reference workbook loaded ({workbook_label} - sheet: {reference_sheet})"
                         )
                     except Exception as exc:
                         st.error(f"Unable to read selected workbook: {exc}")
@@ -1290,6 +1338,31 @@ def merge_without_duplicates(
     incoming_right_key = column_lookup.get(right_key, _clean_column_name(right_key))
     if incoming_right_key not in incoming_df.columns:
         incoming_right_key = right_key
+
+    # Detect collisions where different raw values collapse to the same normalized key
+    collision_messages = []
+    left_collisions = detect_normalized_collisions(base_gdf[left_key])
+    right_collisions = detect_normalized_collisions(incoming_df[incoming_right_key])
+    if left_collisions:
+        examples = "; ".join(
+            ", ".join(sorted(list(values))[:3]) for values in left_collisions.values()
+        )
+        collision_messages.append(
+            f"GeoPackage join field '{left_key}' has values that normalize to the same key ({examples})."
+        )
+    if right_collisions:
+        examples = "; ".join(
+            ", ".join(sorted(list(values))[:3]) for values in right_collisions.values()
+        )
+        collision_messages.append(
+            f"Tabular join field '{right_key}' has values that normalize to the same key ({examples})."
+        )
+    if collision_messages:
+        raise ValueError(
+            "Normalized join key collisions detected. "
+            + " ".join(collision_messages)
+            + " Clean the join fields so each normalized key is unique before merging."
+        )
 
     geometry_name = base_gdf.geometry.name if hasattr(base_gdf, "geometry") else None
 
@@ -1395,11 +1468,6 @@ def merge_without_duplicates(
     if norm_key in merged.columns:
         merged.drop(columns=[norm_key], inplace=True, errors="ignore")
 
-    non_geometry_columns = [c for c in merged.columns if c != geometry_name]
-    if non_geometry_columns:
-        forward_fill_values = merged[non_geometry_columns].replace("", pd.NA).ffill()
-        merged[non_geometry_columns] = forward_fill_values
-
     for col in merged.columns:
         if col == geometry_name:
             continue
@@ -1418,7 +1486,7 @@ def read_pairs_from_zip(uploaded_zip):
             tmp_zip.write(uploaded_zip.getbuffer())
 
         with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(tmpdir)
+            _safe_extract_zip(zf, tmpdir)
 
         paired_files = {}
         for root, _, files in os.walk(tmpdir):
@@ -1498,7 +1566,7 @@ else:
                     cleaned = clean_empty_rows(edited)
                     if not cleaned.dropna(how="all").empty:
                         st.session_state[paste_df_key] = cleaned
-                        st.success("Pasted data parsed successfully ✔")
+                        st.success("Pasted data parsed successfully.")
                     else:
                         st.warning("Pasted data appears empty after cleaning.")
             else:
@@ -1574,7 +1642,7 @@ else:
 
             try:
                 merged_gdf = merge_without_duplicates(gdf.copy(), df_to_merge, left_key, right_key)
-                st.success(f"Attributes merged for {gpkg_file.name} ✔")
+                st.success(f"Attributes merged for {gpkg_file.name}.")
                 st.dataframe(merged_gdf.head())
 
                 with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp:
@@ -1594,7 +1662,7 @@ else:
                         data_bytes = updated.read()
 
                     st.download_button(
-                        f"⬇ Download {output_name}.gpkg",
+                        f"Download {output_name}.gpkg",
                         data=data_bytes,
                         file_name=f"{output_name}.gpkg",
                         mime="application/geopackage+sqlite3",
@@ -1606,11 +1674,11 @@ else:
             except Exception as exc:
                 st.error(f"Error while merging {gpkg_file.name}: {exc}")
 
-# ------------------- GEOMETRY CONVERSION (POLYGON → POINT) -----------------
+# ------------------- GEOMETRY CONVERSION (POLYGON to POINT) -----------------
 with st.container():
     st.markdown('<div class="section-box tertiary">', unsafe_allow_html=True)
     st.markdown(
-        '<div class="section-title">Geometry Conversion (Polygons → Points)</div>',
+        '<div class="section-title">Geometry Conversion (Polygons to Points)</div>',
         unsafe_allow_html=True,
     )
     st.markdown(
@@ -1767,7 +1835,7 @@ with st.container():
 
         if zip_bytes:
             st.download_button(
-                "⬇ Download centroid GeoPackages (ZIP)",
+                "Download centroid GeoPackages (ZIP)",
                 data=zip_bytes,
                 file_name="centroid_points.zip",
                 mime="application/zip",
@@ -1882,7 +1950,7 @@ with st.container():
                         st.success(f"{output_name}.gpkg is ready")
                         st.dataframe(merged_gdf.head())
                         st.download_button(
-                            f"⬇ Download {output_name}.gpkg",
+                            f"Download {output_name}.gpkg",
                             data=data_bytes,
                             file_name=f"{output_name}.gpkg",
                             mime="application/geopackage+sqlite3",
@@ -1897,7 +1965,7 @@ with st.container():
 with st.container():
     st.markdown('<div class="section-box tertiary">', unsafe_allow_html=True)
     st.markdown(
-        '<div class="section-title">GeoPackage → File Geodatabase Conversion</div>',
+        '<div class="section-title">GeoPackage to File Geodatabase Conversion</div>',
         unsafe_allow_html=True,
     )
     st.markdown(
@@ -1956,7 +2024,7 @@ with st.container():
                     f"({feature_count} spatial features, CRS: {crs_text})."
                 )
                 st.download_button(
-                    f"⬇ Download {layer_name}.gdb.zip",
+                    f"Download {layer_name}.gdb.zip",
                     data=archive_bytes,
                     file_name=f"{layer_name}.gdb.zip",
                     mime="application/zip",
@@ -1991,7 +2059,7 @@ with st.container():
 
         if combined_zip_bytes:
             st.download_button(
-                "⬇ Download all File Geodatabases (ZIP)",
+                "Download all File Geodatabases (ZIP)",
                 data=combined_zip_bytes,
                 file_name="file_geodatabases.zip",
                 mime="application/zip",

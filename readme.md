@@ -11,7 +11,7 @@ This app allows you to:
 - Merge the attributes without creating duplicate columns
 - Download a cleaned GeoPackage output for each uploaded bundle
 
-## How to run locally:
+## How to run locally
 
 ```bash
 pip install -r requirements.txt
@@ -24,7 +24,12 @@ streamlit run app.py
 2. Restart the Streamlit app so it can detect the new workbook.
 3. In the **Single File Upload** section choose **Use stored reference workbook**, select the workbook + sheet, and continue the merge as usual.
 
-> ⚠️ Only store non-sensitive data inside the repository if it will be shared publicly.
+> Only store non-sensitive data inside the repository if it will be shared publicly.
+
+### System requirements
+
+- GDAL/PROJ binaries that match the pinned Python wheels (for Fiona/pyogrio/GeoPandas).
+- FileGDB driver support if you plan to export to ESRI File Geodatabases (install the ESRI FileGDB SDK and ensure GDAL sees the plugin).
 
 ### Need a sample workbook without committing binaries?
 
@@ -36,5 +41,4 @@ python scripts/generate_sample_reference.py
 
 The script recreates `reference_data/sample_substations.xlsx` on demand using pandas + openpyxl, so the repository can stay binary-free while still giving you a ready-to-use template. You can inspect the expected schema in [`reference_data/TEMPLATE.md`](reference_data/TEMPLATE.md) before crafting your own workbook.
 
-Note: UI settings (hero height and left/right split) can be adjusted inside the running app under "UI Settings" — use the sliders for a live preview and click "Save UI settings" to persist choices across sessions.
-
+Note: UI settings (hero height and left/right split) can be adjusted inside the running app under "UI Settings" - use the sliders for a live preview and click "Save UI settings" to persist choices across sessions.

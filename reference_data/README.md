@@ -16,4 +16,4 @@ Need a quick refresher on the expected schema? See [`TEMPLATE.md`](TEMPLATE.md).
 2. Restart the Streamlit app.
 3. Choose **Use stored reference workbook** in the UI and select the workbook + sheet to merge into your GeoPackage.
 
-> ⚠️ Avoid storing confidential data here if the repository is public.
+> Avoid storing confidential data here if the repository is public.
