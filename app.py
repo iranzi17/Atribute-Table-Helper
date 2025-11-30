@@ -22,6 +22,9 @@ import pyogrio
 # Prefer GDAL-backed pyogrio engine to avoid requiring fiona wheels in hosted environments
 gpd.options.io_engine = "pyogrio"
 
+# Create rectangles from points
+from shapely.geometry import box
+
 # Optional fiona: use if available for extra drivers (e.g., FileGDB), but do not require it
 try:
     import fiona
@@ -1682,6 +1685,143 @@ else:
                         os.remove(temp_path)
             except Exception as exc:
                 st.error(f"Error while merging {gpkg_file.name}: {exc}")
+
+# ------------------- GEOMETRY CONVERSION (POINT to POLYGON) -----------------
+with st.container():
+    st.markdown('<div class="section-box tertiary">', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-title">Geometry Conversion (Points to Polygons)</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<p class='section-subtext'>Upload GeoPackage(s) containing Point geometries and convert each point into a rectangular Polygon (specified length and width in meters). Rectangles are created in EPSG:3857 (metric) and reprojected back to the source CRS. For large extents prefer a local UTM projection.</p>",
+        unsafe_allow_html=True,
+    )
+
+    pt_to_poly_files = st.file_uploader(
+        "Upload GeoPackage (.gpkg) for point→polygon conversion",
+        type=["gpkg"],
+        key="point_to_polygon_gpkg",
+        accept_multiple_files=True,
+    )
+
+    length_m = st.number_input(
+        "Length (meters; north-south)",
+        min_value=0.01,
+        value=50.0,
+        step=0.1,
+        key="ptpoly_length",
+    )
+    width_m = st.number_input(
+        "Width (meters; east-west)",
+        min_value=0.01,
+        value=50.0,
+        step=0.1,
+        key="ptpoly_width",
+    )
+
+    converted_pt_packages = []
+
+    if pt_to_poly_files:
+        for pt_file in pt_to_poly_files:
+            st.markdown(f"**Processing:** {pt_file.name}")
+            temp_input_path = None
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp_in:
+                    tmp_in.write(pt_file.getbuffer())
+                    temp_input_path = tmp_in.name
+                gdf = gpd.read_file(temp_input_path)
+            except Exception as exc:
+                st.error(f"Unable to read {pt_file.name}: {exc}")
+                if temp_input_path and os.path.exists(temp_input_path):
+                    os.remove(temp_input_path)
+                continue
+            finally:
+                if temp_input_path and os.path.exists(temp_input_path):
+                    os.remove(temp_input_path)
+
+            geom_types = gdf.geom_type.dropna().unique().tolist()
+            has_point = any("point" in str(gt).lower() for gt in geom_types)
+            if not has_point:
+                st.info("No Point geometries detected; skipping.")
+                continue
+
+            orig_crs = gdf.crs
+            if orig_crs is None:
+                st.warning(
+                    "Source layer has no CRS; assuming EPSG:4326 (lat/lon). Results may be inaccurate."
+                )
+                orig_crs = "EPSG:4326"
+                gdf = gdf.set_crs(orig_crs, allow_override=True)
+
+            try:
+                metric_crs = "EPSG:3857"
+                gdf_metric = gdf.to_crs(metric_crs)
+                polys = []
+                for _, row in gdf_metric.iterrows():
+                    geom = row.geometry
+                    if geom is None or geom.is_empty or not geom.geom_type.lower().endswith("point"):
+                        polys.append(None)
+                        continue
+                    x = geom.x
+                    y = geom.y
+                    half_w = float(width_m) / 2.0
+                    half_l = float(length_m) / 2.0
+                    poly = box(x - half_w, y - half_l, x + half_w, y + half_l)
+                    polys.append(poly)
+
+                poly_gdf = gdf.copy()
+                poly_gdf["geometry"] = gpd.GeoSeries(polys, index=poly_gdf.index, crs=metric_crs)
+                poly_gdf = poly_gdf.set_geometry("geometry").to_crs(orig_crs)
+                st.success("Rectangular polygons generated.")
+                st.dataframe(poly_gdf.head())
+
+                temp_output_path = None
+                safe_poly = sanitize_gdf_for_gpkg(poly_gdf)
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp_out:
+                        temp_output_path = tmp_out.name
+                    layer_name = derive_layer_name_from_filename(pt_file.name)
+                    safe_poly.to_file(temp_output_path, driver="GPKG", layer=layer_name)
+                    with open(temp_output_path, "rb") as converted:
+                        converted_pt_packages.append((pt_file.name, converted.read()))
+                except Exception as exc:
+                    st.error(f"Failed to prepare polygon GeoPackage for {pt_file.name}: {exc}")
+                finally:
+                    if temp_output_path and os.path.exists(temp_output_path):
+                        os.remove(temp_output_path)
+            except Exception as exc:
+                st.error(f"Failed to generate polygons for {pt_file.name}: {exc}")
+    else:
+        st.info("Upload at least one GeoPackage to begin conversion.")
+
+    if converted_pt_packages:
+        zip_bytes = None
+        temp_zip_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_zip:
+                temp_zip_path = tmp_zip.name
+            with zipfile.ZipFile(temp_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for file_name, contents in converted_pt_packages:
+                    zf.writestr(file_name, contents)
+            with open(temp_zip_path, "rb") as zip_file:
+                zip_bytes = zip_file.read()
+        except Exception as exc:
+            zip_bytes = None
+            st.error(f"Failed to package polygon GeoPackages: {exc}")
+        finally:
+            if temp_zip_path and os.path.exists(temp_zip_path):
+                os.remove(temp_zip_path)
+
+        if zip_bytes:
+            st.download_button(
+                "Download polygon GeoPackages (ZIP)",
+                data=zip_bytes,
+                file_name="point_polygons.zip",
+                mime="application/zip",
+            )
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ------------------- GEOMETRY CONVERSION (POLYGON to POINT) -----------------
 with st.container():
