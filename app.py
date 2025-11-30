@@ -22,8 +22,10 @@ import pyogrio
 # Prefer GDAL-backed pyogrio engine to avoid requiring fiona wheels in hosted environments
 gpd.options.io_engine = "pyogrio"
 
-# Create rectangles from points
+# Create rectangles from points and support rotation
 from shapely.geometry import box
+from shapely.affinity import rotate
+import pydeck as pdk
 
 # Optional fiona: use if available for extra drivers (e.g., FileGDB), but do not require it
 try:
@@ -1719,6 +1721,20 @@ with st.container():
         step=0.1,
         key="ptpoly_width",
     )
+    rotation_deg = st.number_input(
+        "Rotation (degrees clockwise)",
+        min_value=-360.0,
+        max_value=360.0,
+        value=0.0,
+        step=0.5,
+        key="ptpoly_rotation",
+    )
+
+    preview_map = st.checkbox(
+        "Show preview map of generated polygons",
+        value=True,
+        key="ptpoly_preview",
+    )
 
     converted_pt_packages = []
 
@@ -1768,6 +1784,13 @@ with st.container():
                     half_w = float(width_m) / 2.0
                     half_l = float(length_m) / 2.0
                     poly = box(x - half_w, y - half_l, x + half_w, y + half_l)
+                    try:
+                        # shapely.affinity.rotate rotates counter-clockwise for positive angles,
+                        # so negate angle to get clockwise rotation as the UI suggests.
+                        if float(rotation_deg) % 360.0 != 0.0:
+                            poly = rotate(poly, -float(rotation_deg), origin=(x, y), use_radians=False)
+                    except Exception:
+                        pass
                     polys.append(poly)
 
                 poly_gdf = gdf.copy()
@@ -1775,6 +1798,40 @@ with st.container():
                 poly_gdf = poly_gdf.set_geometry("geometry").to_crs(orig_crs)
                 st.success("Rectangular polygons generated.")
                 st.dataframe(poly_gdf.head())
+
+                # Preview map using pydeck (only if requested)
+                if preview_map:
+                    try:
+                        poly_wgs = poly_gdf.to_crs("EPSG:4326")
+                        geojson = json.loads(poly_wgs.to_json())
+                        # Compute centroid for initial view
+                        centroids = poly_wgs.geometry.centroid
+                        lon_mean = float(centroids.x.mean()) if len(centroids) > 0 else 0.0
+                        lat_mean = float(centroids.y.mean()) if len(centroids) > 0 else 0.0
+
+                        geo_layer = pdk.Layer(
+                            "GeoJsonLayer",
+                            data=geojson,
+                            pickable=True,
+                            stroked=True,
+                            filled=True,
+                            get_fill_color=[255, 165, 0, 140],
+                            get_line_color=[0, 0, 0],
+                            line_width_min_pixels=1,
+                        )
+
+                        deck = pdk.Deck(
+                            layers=[geo_layer],
+                            initial_view_state=pdk.ViewState(
+                                longitude=lon_mean,
+                                latitude=lat_mean,
+                                zoom=14,
+                                pitch=0,
+                            ),
+                        )
+                        st.pydeck_chart(deck)
+                    except Exception as exc:
+                        st.warning(f"Preview unavailable: {exc}")
 
                 temp_output_path = None
                 safe_poly = sanitize_gdf_for_gpkg(poly_gdf)
