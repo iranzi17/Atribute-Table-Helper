@@ -1696,187 +1696,218 @@ with st.container():
         unsafe_allow_html=True,
     )
     st.markdown(
-        "<p class='section-subtext'>Upload GeoPackage(s) containing Point geometries and convert each point into a rectangular Polygon (specified length and width in meters). Rectangles are created in EPSG:3857 (metric) and reprojected back to the source CRS. For large extents prefer a local UTM projection.</p>",
+        "<p class='section-subtext'>Upload a GeoPackage (.gpkg) or File Geodatabase (.gdb), select a point layer, and convert points into rectangular polygons (length × width in meters). Download the updated file in the same format.</p>",
         unsafe_allow_html=True,
     )
 
-    pt_to_poly_files = st.file_uploader(
-        "Upload GeoPackage (.gpkg) for point→polygon conversion",
-        type=["gpkg"],
+    pt_to_poly_file = st.file_uploader(
+        "Upload GeoPackage (.gpkg) or File Geodatabase (.gdb)",
+        type=["gpkg", "gdb"],
         key="point_to_polygon_gpkg",
-        accept_multiple_files=True,
+        accept_multiple_files=False,
     )
 
-    length_m = st.number_input(
-        "Length (meters; north-south)",
-        min_value=0.01,
-        value=50.0,
-        step=0.1,
-        key="ptpoly_length",
-    )
-    width_m = st.number_input(
-        "Width (meters; east-west)",
-        min_value=0.01,
-        value=50.0,
-        step=0.1,
-        key="ptpoly_width",
-    )
-    rotation_deg = st.number_input(
-        "Rotation (degrees clockwise)",
-        min_value=-360.0,
-        max_value=360.0,
-        value=0.0,
-        step=0.5,
-        key="ptpoly_rotation",
-    )
-
-    preview_map = st.checkbox(
-        "Show preview map of generated polygons",
-        value=True,
-        key="ptpoly_preview",
-    )
-
-    converted_pt_packages = []
-
-    if pt_to_poly_files:
-        for pt_file in pt_to_poly_files:
-            st.markdown(f"**Processing:** {pt_file.name}")
-            temp_input_path = None
-            try:
-                with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp_in:
-                    tmp_in.write(pt_file.getbuffer())
-                    temp_input_path = tmp_in.name
-                gdf = gpd.read_file(temp_input_path)
-            except Exception as exc:
-                st.error(f"Unable to read {pt_file.name}: {exc}")
-                if temp_input_path and os.path.exists(temp_input_path):
-                    os.remove(temp_input_path)
-                continue
-            finally:
-                if temp_input_path and os.path.exists(temp_input_path):
-                    os.remove(temp_input_path)
-
-            geom_types = gdf.geom_type.dropna().unique().tolist()
-            has_point = any("point" in str(gt).lower() for gt in geom_types)
-            if not has_point:
-                st.info("No Point geometries detected; skipping.")
-                continue
-
-            orig_crs = gdf.crs
-            if orig_crs is None:
-                st.warning(
-                    "Source layer has no CRS; assuming EPSG:4326 (lat/lon). Results may be inaccurate."
-                )
-                orig_crs = "EPSG:4326"
-                gdf = gdf.set_crs(orig_crs, allow_override=True)
-
-            try:
-                metric_crs = "EPSG:3857"
-                gdf_metric = gdf.to_crs(metric_crs)
-                polys = []
-                for _, row in gdf_metric.iterrows():
-                    geom = row.geometry
-                    if geom is None or geom.is_empty or not geom.geom_type.lower().endswith("point"):
-                        polys.append(None)
-                        continue
-                    x = geom.x
-                    y = geom.y
-                    half_w = float(width_m) / 2.0
-                    half_l = float(length_m) / 2.0
-                    poly = box(x - half_w, y - half_l, x + half_w, y + half_l)
-                    try:
-                        # shapely.affinity.rotate rotates counter-clockwise for positive angles,
-                        # so negate angle to get clockwise rotation as the UI suggests.
-                        if float(rotation_deg) % 360.0 != 0.0:
-                            poly = rotate(poly, -float(rotation_deg), origin=(x, y), use_radians=False)
-                    except Exception:
-                        pass
-                    polys.append(poly)
-
-                poly_gdf = gdf.copy()
-                poly_gdf["geometry"] = gpd.GeoSeries(polys, index=poly_gdf.index, crs=metric_crs)
-                poly_gdf = poly_gdf.set_geometry("geometry").to_crs(orig_crs)
-                st.success("Rectangular polygons generated.")
-                st.dataframe(poly_gdf.head())
-
-                # Preview map using pydeck (only if requested)
-                if preview_map:
-                    try:
-                        poly_wgs = poly_gdf.to_crs("EPSG:4326")
-                        geojson = json.loads(poly_wgs.to_json())
-                        # Compute centroid for initial view
-                        centroids = poly_wgs.geometry.centroid
-                        lon_mean = float(centroids.x.mean()) if len(centroids) > 0 else 0.0
-                        lat_mean = float(centroids.y.mean()) if len(centroids) > 0 else 0.0
-
-                        geo_layer = pdk.Layer(
-                            "GeoJsonLayer",
-                            data=geojson,
-                            pickable=True,
-                            stroked=True,
-                            filled=True,
-                            get_fill_color=[255, 165, 0, 140],
-                            get_line_color=[0, 0, 0],
-                            line_width_min_pixels=1,
-                        )
-
-                        deck = pdk.Deck(
-                            layers=[geo_layer],
-                            initial_view_state=pdk.ViewState(
-                                longitude=lon_mean,
-                                latitude=lat_mean,
-                                zoom=14,
-                                pitch=0,
-                            ),
-                        )
-                        st.pydeck_chart(deck)
-                    except Exception as exc:
-                        st.warning(f"Preview unavailable: {exc}")
-
-                temp_output_path = None
-                safe_poly = sanitize_gdf_for_gpkg(poly_gdf)
-                try:
-                    with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp_out:
-                        temp_output_path = tmp_out.name
-                    layer_name = derive_layer_name_from_filename(pt_file.name)
-                    safe_poly.to_file(temp_output_path, driver="GPKG", layer=layer_name)
-                    with open(temp_output_path, "rb") as converted:
-                        converted_pt_packages.append((pt_file.name, converted.read()))
-                except Exception as exc:
-                    st.error(f"Failed to prepare polygon GeoPackage for {pt_file.name}: {exc}")
-                finally:
-                    if temp_output_path and os.path.exists(temp_output_path):
-                        os.remove(temp_output_path)
-            except Exception as exc:
-                st.error(f"Failed to generate polygons for {pt_file.name}: {exc}")
-    else:
-        st.info("Upload at least one GeoPackage to begin conversion.")
-
-    if converted_pt_packages:
-        zip_bytes = None
-        temp_zip_path = None
+    if pt_to_poly_file:
+        temp_input_path = None
         try:
-            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_zip:
-                temp_zip_path = tmp_zip.name
-            with zipfile.ZipFile(temp_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                for file_name, contents in converted_pt_packages:
-                    zf.writestr(file_name, contents)
-            with open(temp_zip_path, "rb") as zip_file:
-                zip_bytes = zip_file.read()
-        except Exception as exc:
-            zip_bytes = None
-            st.error(f"Failed to package polygon GeoPackages: {exc}")
-        finally:
-            if temp_zip_path and os.path.exists(temp_zip_path):
-                os.remove(temp_zip_path)
+            # Determine file format and create temp file with appropriate extension
+            file_suffix = Path(pt_to_poly_file.name).suffix.lower()
+            temp_suffix = file_suffix if file_suffix in [".gpkg", ".gdb"] else ".gpkg"
+            with tempfile.NamedTemporaryFile(suffix=temp_suffix, delete=False) as tmp_in:
+                tmp_in.write(pt_to_poly_file.getbuffer())
+                temp_input_path = tmp_in.name
 
-        if zip_bytes:
-            st.download_button(
-                "Download polygon GeoPackages (ZIP)",
-                data=zip_bytes,
-                file_name="point_polygons.zip",
-                mime="application/zip",
-            )
+            # List all layers in the file (works for both .gpkg and .gdb)
+            layer_names = pyogrio.list_layers(temp_input_path)
+            if hasattr(layer_names, "name"):
+                layer_list = list(layer_names["name"])
+            else:
+                layer_list = [li[0] if isinstance(li, (list, tuple)) else str(li) for li in layer_names]
+
+            if not layer_list:
+                st.warning("No layers found in the GeoPackage.")
+            else:
+                selected_layer = st.selectbox(
+                    "Select layer to convert",
+                    layer_list,
+                    key="ptpoly_layer_select",
+                )
+
+                # Load the selected layer
+                gdf = gpd.read_file(temp_input_path, layer=selected_layer)
+
+                geom_types = gdf.geom_type.dropna().unique().tolist()
+                has_point = any("point" in str(gt).lower() for gt in geom_types)
+
+                if not has_point:
+                    st.warning("Selected layer does not contain Point geometries.")
+                else:
+                    st.markdown("**Conversion Parameters**")
+                    length_m = st.number_input(
+                        "Length (meters; north-south)",
+                        min_value=0.01,
+                        value=50.0,
+                        step=0.1,
+                        key="ptpoly_length",
+                    )
+                    width_m = st.number_input(
+                        "Width (meters; east-west)",
+                        min_value=0.01,
+                        value=50.0,
+                        step=0.1,
+                        key="ptpoly_width",
+                    )
+                    rotation_deg = st.number_input(
+                        "Rotation (degrees clockwise)",
+                        min_value=-360.0,
+                        max_value=360.0,
+                        value=0.0,
+                        step=0.5,
+                        key="ptpoly_rotation",
+                    )
+
+                    preview_map = st.checkbox(
+                        "Show preview map",
+                        value=True,
+                        key="ptpoly_preview",
+                    )
+
+                    if st.button("Convert Points to Polygons", key="ptpoly_convert_btn"):
+                        orig_crs = gdf.crs
+                        if orig_crs is None:
+                            st.warning(
+                                "Source layer has no CRS; assuming EPSG:4326 (lat/lon). Results may be inaccurate."
+                            )
+                            orig_crs = "EPSG:4326"
+                            gdf = gdf.set_crs(orig_crs, allow_override=True)
+
+                        try:
+                            metric_crs = "EPSG:3857"
+                            gdf_metric = gdf.to_crs(metric_crs)
+                            polys = []
+                            for _, row in gdf_metric.iterrows():
+                                geom = row.geometry
+                                if geom is None or geom.is_empty or not geom.geom_type.lower().endswith("point"):
+                                    polys.append(None)
+                                    continue
+                                x = geom.x
+                                y = geom.y
+                                half_w = float(width_m) / 2.0
+                                half_l = float(length_m) / 2.0
+                                poly = box(x - half_w, y - half_l, x + half_w, y + half_l)
+                                try:
+                                    if float(rotation_deg) % 360.0 != 0.0:
+                                        poly = rotate(poly, -float(rotation_deg), origin=(x, y), use_radians=False)
+                                except Exception:
+                                    pass
+                                polys.append(poly)
+
+                            poly_gdf = gdf.copy()
+                            poly_gdf["geometry"] = gpd.GeoSeries(polys, index=poly_gdf.index, crs=metric_crs)
+                            poly_gdf = poly_gdf.set_geometry("geometry").to_crs(orig_crs)
+                            st.success("Rectangular polygons generated.")
+                            st.dataframe(poly_gdf.head())
+
+                            # Preview map
+                            if preview_map:
+                                try:
+                                    poly_wgs = poly_gdf.to_crs("EPSG:4326")
+                                    geojson = json.loads(poly_wgs.to_json())
+                                    centroids = poly_wgs.geometry.centroid
+                                    lon_mean = float(centroids.x.mean()) if len(centroids) > 0 else 0.0
+                                    lat_mean = float(centroids.y.mean()) if len(centroids) > 0 else 0.0
+
+                                    geo_layer = pdk.Layer(
+                                        "GeoJsonLayer",
+                                        data=geojson,
+                                        pickable=True,
+                                        stroked=True,
+                                        filled=True,
+                                        get_fill_color=[255, 165, 0, 140],
+                                        get_line_color=[0, 0, 0],
+                                        line_width_min_pixels=1,
+                                    )
+
+                                    deck = pdk.Deck(
+                                        layers=[geo_layer],
+                                        initial_view_state=pdk.ViewState(
+                                            longitude=lon_mean,
+                                            latitude=lat_mean,
+                                            zoom=14,
+                                            pitch=0,
+                                        ),
+                                    )
+                                    st.pydeck_chart(deck)
+                                except Exception as exc:
+                                    st.warning(f"Preview unavailable: {exc}")
+
+                            # Save converted layer, preserving input format
+                            temp_output_path = None
+                            output_driver = None
+                            output_mime = None
+                            
+                            # Determine output format based on input
+                            input_ext = Path(pt_to_poly_file.name).suffix.lower()
+                            if input_ext == ".gdb":
+                                output_driver = "FileGDB"
+                                output_mime = "application/x-filegdb"
+                                temp_output_dir = tempfile.mkdtemp()
+                                temp_output_path = os.path.join(temp_output_dir, "converted.gdb")
+                            else:
+                                output_driver = "GPKG"
+                                output_mime = "application/geopackage+sqlite3"
+                                with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp_out:
+                                    temp_output_path = tmp_out.name
+                            
+                            try:
+                                safe_poly = sanitize_gdf_for_gpkg(poly_gdf)
+                                safe_poly.to_file(temp_output_path, driver=output_driver, layer=selected_layer)
+                                
+                                # For .gdb, zip the .gdb folder; for .gpkg, read file directly
+                                if output_driver == "FileGDB":
+                                    gdb_zip_path = tempfile.mktemp(suffix=".zip")
+                                    try:
+                                        with zipfile.ZipFile(gdb_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                                            for root, _, files in os.walk(temp_output_path):
+                                                for file in files:
+                                                    file_path = os.path.join(root, file)
+                                                    arcname = os.path.relpath(file_path, os.path.dirname(temp_output_path))
+                                                    zf.write(file_path, arcname)
+                                        with open(gdb_zip_path, "rb") as zf_in:
+                                            output_bytes = zf_in.read()
+                                        output_filename = pt_to_poly_file.name.replace(".gdb", "") + ".gdb.zip"
+                                    finally:
+                                        if os.path.exists(gdb_zip_path):
+                                            os.remove(gdb_zip_path)
+                                else:
+                                    with open(temp_output_path, "rb") as converted:
+                                        output_bytes = converted.read()
+                                    output_filename = pt_to_poly_file.name
+
+                                st.download_button(
+                                    f"Download {output_filename}",
+                                    data=output_bytes,
+                                    file_name=output_filename,
+                                    mime=output_mime,
+                                    key="download_ptpoly_gpkg",
+                                )
+                            except Exception as exc:
+                                st.error(f"Failed to prepare output file for download: {exc}")
+                            finally:
+                                if output_driver == "FileGDB" and os.path.exists(temp_output_path):
+                                    shutil.rmtree(temp_output_path, ignore_errors=True)
+                                elif output_driver == "GPKG" and temp_output_path and os.path.exists(temp_output_path):
+                                    os.remove(temp_output_path)
+                        except Exception as exc:
+                            st.error(f"Conversion failed: {exc}")
+
+        except Exception as exc:
+            st.error(f"Unable to read file: {exc}")
+        finally:
+            if temp_input_path and os.path.exists(temp_input_path):
+                os.remove(temp_input_path)
+    else:
+        st.info("Upload a GeoPackage (.gpkg) or File Geodatabase (.gdb) to begin.")
 
     st.markdown('</div>', unsafe_allow_html=True)
 
